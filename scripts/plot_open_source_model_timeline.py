@@ -1,10 +1,10 @@
 from dataclasses import dataclass
 from datetime import datetime
-from datetime import timedelta
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import dates as mdates
+from matplotlib import ticker
 
 
 @dataclass
@@ -41,7 +41,7 @@ def plot_model_timeline(model_infos: list[ModelInfo], save_path: str | None = No
     point_colors = [org_to_color[org] for org in organizations]
 
     # Plot the dates and sizes
-    scatter = ax.scatter(dates_num, sizes, c=point_colors, zorder=5)
+    ax.scatter(dates_num, sizes, c=point_colors, zorder=5)
 
     # Add legend
     legend_elements = [
@@ -63,7 +63,8 @@ def plot_model_timeline(model_infos: list[ModelInfo], save_path: str | None = No
         ax.text(date_num, size * 1.05, name, ha="center", va="bottom", fontsize=9)
 
     # Formatting the axes
-    ax.set_yscale("log")
+    ax.set_yscale("log", base=10)
+    ax.yaxis.set_major_formatter(ticker.ScalarFormatter())
     ax.set_ylabel("Largest Model Size (B parameters)")
     ax.grid(True, which="both", ls="-", alpha=0.2)
 
@@ -71,6 +72,14 @@ def plot_model_timeline(model_infos: list[ModelInfo], save_path: str | None = No
     ax.xaxis.set_major_locator(mdates.YearLocator())  # Only show years
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
     ax.tick_params(axis="x", rotation=45)
+
+    # Set x-axis limits to start from the first year
+    min_date = min(dates)
+    start_year = datetime(min_date.year, 1, 1)
+    max_date = max(dates)
+    end_year = datetime(max_date.year + 1, 1, 1)
+    ax.set_xlim(mdates.date2num(start_year), mdates.date2num(end_year))
+
     ax.set_title("Timeline of Open Source Language Models")
 
     plt.tight_layout()
@@ -131,13 +140,13 @@ model_infos = [
         model_type="dense",
         organization="Google",
     ),
-    ModelInfo(
-        "GPT-2",
-        datetime(2019, 2, 14),
-        [0.117, 0.345, 0.762, 1.5],
-        model_type="dense",
-        organization="OpenAI",
-    ),
+    # ModelInfo(
+    #     "GPT-2",
+    #     datetime(2019, 2, 14),
+    #     [0.117, 0.345, 0.762, 1.5],
+    #     model_type="dense",
+    #     organization="OpenAI",
+    # ),
     ModelInfo(
         "DeepSeek V3",
         datetime(2024, 12, 26),
@@ -158,6 +167,34 @@ model_infos = [
         [7, 67],
         model_type="dense",
         organization="DeepSeek",
+    ),
+    ModelInfo(
+        "Qwen2.5",
+        datetime(2024, 9, 19),
+        [0.5, 1.5, 3, 7, 14, 32, 72],
+        model_type="dense",
+        organization="Alibaba",
+    ),
+    ModelInfo(
+        "Qwen2",
+        datetime(2024, 6, 7),
+        [0.5, 1.5, 7, 72],
+        model_type="dense",
+        organization="Alibaba",
+    ),
+    ModelInfo(
+        "Qwen1.5",
+        datetime(2024, 2, 4),
+        [0.5, 1.8, 4, 7, 14, 32, 72, 110],
+        model_type="dense",
+        organization="Alibaba",
+    ),
+    ModelInfo(
+        "Qwen",
+        datetime(2023, 9, 28),
+        [1.8, 7, 14, 72],
+        model_type="dense",
+        organization="Alibaba",
     ),
 ]
 
