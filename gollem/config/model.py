@@ -45,4 +45,4 @@ def get_model_config(name: str, **kwargs) -> ModelConfig:
     if not kwargs:
         return base_cfg
 
-    return base_cfg.override(**kwargs)
+    return base_cfg.override(base_cfg, **kwargs)
