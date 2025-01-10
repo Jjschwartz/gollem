@@ -11,7 +11,7 @@
 
 # --tensorcores may have minimal effect, but at least doesn't seem to negatively 
 #     affect speed if enables
-python gollem/train/train_gpt.py \
+uv run python gollem/train/train_gpt.py \
     --model gpt2 \
     --train_data gollem/data/tinyshakespeare/tiny_shakespeare_train.bin \
     --val_data gollem/data/tinyshakespeare/tiny_shakespeare_val.bin \
