@@ -27,8 +27,8 @@ uv run python gollem/train/train_gpt.py \
     --learning_rate 0.0006 \
     --warmup_iters 700 \
     --learning_rate_decay_frac 0.0 \
-    --dtype float16 \ 
+    --dtype float16 \
     --flash 1 \
     --compile 1 \
-    --fused_adamw 0 \ 
+    --fused_adamw 0 \
     --tensorcores 1
