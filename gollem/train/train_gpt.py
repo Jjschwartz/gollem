@@ -20,8 +20,8 @@ import numpy as np
 import tiktoken
 import torch
 
-from gollem.config.model import get_model_config
 from gollem.data.loader import DataLoader
+from gollem.models.config import get_model_config
 from gollem.models.gpt2 import GPT
 
 

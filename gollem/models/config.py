@@ -1,7 +1,17 @@
 import importlib
 from dataclasses import asdict
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+from typing import Callable
 from typing import Self
+from typing import Tuple
+
+import tiktoken
+import torch
+
+
+if TYPE_CHECKING:
+    from gollem.models.model import BaseLLM
 
 
 @dataclass
@@ -17,6 +27,17 @@ class ModelConfig:
     share_embd_params: bool = True
     flash_attention: bool = True
 
+    def get_tokenizer(self) -> tiktoken.Encoding:
+        raise NotImplementedError()
+
+    def get_model_and_optimizer(
+        self, device: str
+    ) -> Tuple["BaseLLM", torch.optim.Optimizer]:
+        raise NotImplementedError()
+
+    def get_lr_scheduler(self, num_iterations: int) -> Callable[[int], float]:
+        raise NotImplementedError()
+
     @classmethod
     def override(cls, existing: Self, **kwargs) -> Self:
         base_cfg_kwargs = asdict(existing)
@@ -25,7 +46,7 @@ class ModelConfig:
 
 
 _registry = {
-    "gpt2": ("gpt2", "MODEL_CONFIGS"),
+    "gpt2": ("gpt2.config", "MODEL_CONFIGS"),
 }
 
 
@@ -38,7 +59,7 @@ def get_model_config(name: str, **kwargs) -> ModelConfig:
 
     model_config_file, model_config_var = _registry[name]
 
-    model_config_module = importlib.import_module(f"gollem.config.{model_config_file}")
+    model_config_module = importlib.import_module(f"gollem.models.{model_config_file}")
     model_config_registry = getattr(model_config_module, model_config_var)
 
     base_cfg = model_config_registry[name]

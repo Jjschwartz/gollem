@@ -5,6 +5,7 @@ Ref:
 https://github.com/karpathy/llm.c/blob/master/dev/data/data_common.py
 """
 
+from pathlib import Path
 from typing import Sequence
 
 import numpy as np
@@ -12,14 +13,18 @@ import requests
 from tqdm import tqdm
 
 
-def download_file(url: str, fname: str, chunk_size: int = 1024):
+DATA_CACHE_DIR = Path(__file__).parent / "data"
+DATA_CACHE_DIR.mkdir(exist_ok=True)
+
+
+def download_file(url: str, file_path: Path, chunk_size: int = 1024):
     """Helper function to download a file from a given url"""
     resp = requests.get(url, stream=True)
     total = int(resp.headers.get("content-length", 0))
     with (
-        open(fname, "wb") as file,
+        open(file_path, "wb") as file,
         tqdm(
-            desc=fname,
+            desc=str(file_path),
             total=total,
             unit="iB",
             unit_scale=True,
@@ -31,7 +36,7 @@ def download_file(url: str, fname: str, chunk_size: int = 1024):
             bar.update(size)
 
 
-def write_datafile(filename: str, toks: np.ndarray | Sequence[int]):
+def write_datafile(file_path: Path, toks: np.ndarray | Sequence[int]):
     """Saves token data as a .bin file, for reading in C.
 
     - First comes a header with 256 int32s
@@ -55,7 +60,7 @@ def write_datafile(filename: str, toks: np.ndarray | Sequence[int]):
     else:
         toks_np = toks
     # write to file
-    print(f"writing {len(toks):,} tokens to {filename}")
-    with open(filename, "wb") as f:
+    print(f"writing {len(toks):,} tokens to {file_path}")
+    with open(file_path, "wb") as f:
         f.write(header.tobytes())
         f.write(toks_np.tobytes())

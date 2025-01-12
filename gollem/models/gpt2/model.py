@@ -9,13 +9,18 @@ model so we can easily load pretained weights
 
 import inspect
 import math
+from typing import TYPE_CHECKING
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from gollem.config.gpt2 import get_model_config
-from gollem.config.model import ModelConfig
+from gollem.models.config import ModelConfig
+from gollem.models.model import BaseLLM
+
+
+if TYPE_CHECKING:
+    from gollem.models.gpt2.config import GPT2Config
 
 
 class Attention(nn.Module):
@@ -119,10 +124,11 @@ class TransformerBlock(nn.Module):
         return x
 
 
-class GPT(nn.Module):
-    def __init__(self, cfg: ModelConfig):
-        super().__init__()
-        self.cfg = cfg
+class GPT(BaseLLM["GPT2Config"]):
+    """GPT-2 model."""
+
+    def __init__(self, cfg: "GPT2Config"):
+        super().__init__(cfg)
 
         self.transformer = nn.ModuleDict(
             {
@@ -212,55 +218,7 @@ class GPT(nn.Module):
 
         return logits, loss
 
-    @torch.no_grad()
-    def generate(
-        self,
-        tokens: torch.Tensor,
-        max_new_tokens: int,
-        temperature: float = 1.0,
-        top_k: int | None = None,
-    ):
-        """Generate sequence.
-
-        Takes a conditioning sequence of token indices idx (LongTensor of shape (b,t))
-        and completes the sequence max_new_tokens times, feeding the predictions back
-        into the model each time.
-
-        Most likely you'll want to make sure to be in model.eval() mode of operation
-        for this.
-        """
-        for _ in range(max_new_tokens):
-            # if the sequence context is growing too long we must crop it at block_size
-            ctx = (
-                tokens
-                if tokens.size(1) <= self.cfg.n_ctx
-                else tokens[:, -self.cfg.n_ctx :]
-            )
-            # forward the model to get the logits for the index in the sequence
-            logits, _ = self(ctx)
-            # pluck the logits at the final step and scale by desired temperature
-            logits = logits[:, -1, :] / temperature
-            # optionally crop the logits to only the top k options
-            if top_k is not None:
-                v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
-                logits[logits < v[:, [-1]]] = -float("Inf")
-            # apply softmax to convert logits to (normalized) probabilities
-            probs = F.softmax(logits, dim=-1)
-            # sample from the distribution
-            next_token = torch.multinomial(probs, num_samples=1)
-            # append sampled index to the running sequence and continue
-            tokens = torch.cat((tokens, next_token), dim=1)
-
-        return tokens
-
-    def configure_optimizers(
-        self,
-        weight_decay: float,
-        learning_rate: float,
-        betas: tuple[float, float],
-        device_type: str,
-        use_fused: bool,
-    ):
+    def configure_optimizers(self, device_type: str) -> torch.optim.Optimizer:
         # start with all of the candidate parameters
         param_dict = dict(self.named_parameters())
         # filter out those that do not require grad
@@ -270,7 +228,7 @@ class GPT(nn.Module):
         decay_params = [p for p in param_dict.values() if p.dim() >= 2]
         nodecay_params = [p for p in param_dict.values() if p.dim() < 2]
         optim_groups = [
-            {"params": decay_params, "weight_decay": weight_decay},
+            {"params": decay_params, "weight_decay": self.cfg.weight_decay},
             {"params": nodecay_params, "weight_decay": 0.0},
         ]
         num_decay_params = sum(p.numel() for p in decay_params)
@@ -285,24 +243,27 @@ class GPT(nn.Module):
         )
 
         # Create AdamW optimizer and use the fused version if it is available
-        if use_fused:
+        if self.cfg.fused_adamw:
             fused_available = "fused" in inspect.signature(torch.optim.AdamW).parameters
             use_fused = fused_available and device_type == "cuda"
         print(f"Using regular AdamW with fused={use_fused}")
         optimizer = torch.optim.AdamW(
-            optim_groups, lr=learning_rate, betas=betas, fused=use_fused
+            optim_groups,
+            lr=self.cfg.learning_rate,
+            betas=self.cfg.betas,
+            fused=use_fused,
         )
         return optimizer
 
     @classmethod
-    def from_pretrained(cls, model_type: str) -> "GPT":
+    def from_pretrained(cls, config: "GPT2Config") -> "GPT":
         """Loads pretrained GPT-2 model weights from huggingface"""
+        model_type = config.model_name
         assert model_type in {"gpt2", "gpt2-medium", "gpt2-large", "gpt2-xl"}
         from transformers import GPT2LMHeadModel
 
         print("loading weights from pretrained gpt: %s" % model_type)
 
-        config = get_model_config(model_type)
         model = GPT(config)
         sd = model.state_dict()
         sd_keys = sd.keys()

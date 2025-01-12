@@ -11,7 +11,7 @@ import numpy as np
 import tiktoken
 import torch
 
-from gollem.config.gpt2 import get_model_config
+from gollem.models.gpt2.config import get_model_config
 from gollem.models.gpt2 import GPT
 
 
