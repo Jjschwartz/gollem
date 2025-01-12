@@ -1,8 +1,5 @@
-import importlib
 from dataclasses import dataclass
 from pathlib import Path
-
-import tiktoken
 
 
 # Dataset has a couple of levels:
@@ -29,19 +26,3 @@ class DataConfig:
     train_data: Path
     # Path to the validation data.
     val_data: Path | None
-
-
-_registry = {
-    "tiny_shakespeare": ("tinyshakespeare", "load_data"),
-}
-
-
-def load_dataset(
-    name: str,
-    encoder: tiktoken.Encoding,
-) -> DataConfig:
-    assert name in _registry
-    dataset_module_name, load_fn_name = _registry[name]
-    dataset_module = importlib.import_module(f"gollem.data.{dataset_module_name}")
-    load_fn = getattr(dataset_module, load_fn_name)
-    return load_fn(encoder)

@@ -13,7 +13,7 @@ import requests
 from tqdm import tqdm
 
 
-DATA_CACHE_DIR = Path(__file__).parent / "data"
+DATA_CACHE_DIR = Path(__file__).parent / "datasets"
 DATA_CACHE_DIR.mkdir(exist_ok=True)
 
 
@@ -53,9 +53,9 @@ def write_datafile(file_path: Path, toks: np.ndarray | Sequence[int]):
     if not isinstance(toks, np.ndarray) or toks.dtype != np.uint16:
         # validate that no token exceeds a uint16
         maxtok = 2**16
-        assert all(0 <= t < maxtok for t in toks), (
-            "token dictionary too large for uint16"
-        )
+        assert all(
+            0 <= t < maxtok for t in toks
+        ), "token dictionary too large for uint16"
         toks_np = np.array(toks, dtype=np.uint16)
     else:
         toks_np = toks

@@ -1,5 +1,6 @@
 import time
 from contextlib import nullcontext
+from pathlib import Path
 from pprint import pprint
 
 import numpy as np
@@ -97,8 +98,9 @@ def run(
     # create the logging directory if it does not exist
     logfile = None
     if train_config.output_dir:
-        train_config.output_dir.mkdir(parents=True, exist_ok=True)
-        logfile = train_config.output_dir / "main.log"
+        output_dir = Path(train_config.output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        logfile = output_dir / "main.log"
         # create the log file "main.log" inside it, and wipe it clean
         logfile.write_text("")
 

@@ -1,5 +1,6 @@
 results/*
 launch_dev_env.sh
+gollem/data/datasets/*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

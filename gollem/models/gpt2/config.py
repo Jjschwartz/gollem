@@ -88,47 +88,37 @@ class GPT2Config(ModelConfig):
         return get_lr
 
 
-MODEL_CONFIGS = {
-    # 124M params
-    "gpt2": GPT2Config(
-        n_layer=12,
-        n_head=12,
-        d_model=768,
-        d_mlp=4 * 768,
-    ),
-    # 350M params
-    "gpt2-medium": GPT2Config(
-        n_layer=24,
-        n_head=16,
-        d_model=1024,
-        d_mlp=4 * 1024,
-    ),
-    # 774M params
-    "gpt2-large": GPT2Config(
-        n_layer=36,
-        n_head=20,
-        d_model=1280,
-        d_mlp=4 * 1280,
-    ),
-    # 1558M params
-    "gpt2-xl": GPT2Config(
-        n_layer=48,
-        n_head=25,
-        d_model=1600,
-        d_mlp=4 * 1600,
-    ),
-}
+# 124M params
+GPT2_CONFIG = GPT2Config(
+    model_name="gpt2",
+    n_layer=12,
+    n_head=12,
+    d_model=768,
+    d_mlp=4 * 768,
+)
+# 350M params
+GPT2_MEDIUM_CONFIG = GPT2Config(
+    model_name="gpt2-medium",
+    n_layer=24,
+    n_head=16,
+    d_model=1024,
+    d_mlp=4 * 1024,
+)
 
+# 774M params
+GPT2_LARGE_CONFIG = GPT2Config(
+    model_name="gpt2-large",
+    n_layer=36,
+    n_head=20,
+    d_model=1280,
+    d_mlp=4 * 1280,
+)
 
-def get_model_config(name: str, **kwargs) -> ModelConfig:
-    """Get named model config.
-
-    Any defaults will be overwridden by values in kwargs.
-    """
-    assert name in MODEL_CONFIGS
-    if not kwargs:
-        return MODEL_CONFIGS[name]
-
-    base_cfg_kwargs = asdict(MODEL_CONFIGS[name])
-    base_cfg_kwargs.update(kwargs)
-    return ModelConfig(**base_cfg_kwargs)
+# 1558M params
+GPT2_XL_CONFIG = GPT2Config(
+    model_name="gpt2-xl",
+    n_layer=48,
+    n_head=25,
+    d_model=1600,
+    d_mlp=4 * 1600,
+)

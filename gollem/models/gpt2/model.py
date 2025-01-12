@@ -181,9 +181,9 @@ class GPT(BaseLLM["GPT2Config"]):
         """Forward pass on token idxs, with optional loss computation."""
         device = tokens.device
         _, T = tokens.size()
-        assert self.cfg.n_ctx >= T, (
-            f"Cannot forward sequence of length {T}, ctx size is only {self.cfg.n_ctx}"
-        )
+        assert (
+            self.cfg.n_ctx >= T
+        ), f"Cannot forward sequence of length {T}, ctx size is only {self.cfg.n_ctx}"
 
         # generate embedding
         # token embeddings of shape (B, T, d_model)
@@ -243,9 +243,11 @@ class GPT(BaseLLM["GPT2Config"]):
         )
 
         # Create AdamW optimizer and use the fused version if it is available
+        use_fused = False
         if self.cfg.fused_adamw:
             fused_available = "fused" in inspect.signature(torch.optim.AdamW).parameters
             use_fused = fused_available and device_type == "cuda"
+
         print(f"Using regular AdamW with fused={use_fused}")
         optimizer = torch.optim.AdamW(
             optim_groups,
@@ -291,9 +293,9 @@ class GPT(BaseLLM["GPT2Config"]):
         # basically the openai checkpoints use a "Conv1D" module, but we only want to
         # use a vanilla Linear this means that we have to transpose these weights when
         # we import them
-        assert len(sd_keys_hf) == len(sd_keys), (
-            f"mismatched keys: {len(sd_keys_hf)} != {len(sd_keys)}"
-        )
+        assert len(sd_keys_hf) == len(
+            sd_keys
+        ), f"mismatched keys: {len(sd_keys_hf)} != {len(sd_keys)}"
 
         for k in sd_keys_hf:
             if any(k.endswith(w) for w in transposed):

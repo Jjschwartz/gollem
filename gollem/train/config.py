@@ -32,4 +32,4 @@ class TrainConfig:
     # Dtype to use for model
     dtype: Literal["float32", "float16", "bfloat16"] = "float32"
     # Use GPU tensorcores.
-    tensorcores: int = 0
+    tensorcores: bool = False

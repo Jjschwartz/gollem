@@ -43,27 +43,3 @@ class ModelConfig:
         base_cfg_kwargs = asdict(existing)
         base_cfg_kwargs.update(kwargs)
         return cls(**base_cfg_kwargs)
-
-
-_registry = {
-    "gpt2": ("gpt2.config", "MODEL_CONFIGS"),
-}
-
-
-def get_model_config(name: str, **kwargs) -> ModelConfig:
-    """Get named model config.
-
-    Any defaults will be overwridden by values in kwargs.
-    """
-    assert name in _registry
-
-    model_config_file, model_config_var = _registry[name]
-
-    model_config_module = importlib.import_module(f"gollem.models.{model_config_file}")
-    model_config_registry = getattr(model_config_module, model_config_var)
-
-    base_cfg = model_config_registry[name]
-    if not kwargs:
-        return base_cfg
-
-    return base_cfg.override(base_cfg, **kwargs)
