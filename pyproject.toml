@@ -9,12 +9,15 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "datasets>=3.2.0",
     "matplotlib>=3.10.0",
     "numpy>=2.2.1",
     "pyrallis>=0.3.1",
     "seaborn>=0.13.2",
     "tiktoken>=0.8.0",
+    "tokenizers>=0.21.0",
     "tqdm>=4.67.1",
+    "transformers>=4.48.0",
     "wandb>=0.19.2",
 ]
 

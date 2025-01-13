@@ -36,7 +36,7 @@ def download_file(url: str, file_path: Path, chunk_size: int = 1024):
             bar.update(size)
 
 
-def write_datafile(file_path: Path, toks: np.ndarray | Sequence[int]):
+def write_datafile(file_path: Path, toks: np.ndarray | Sequence[int], n_vocab: int):
     """Saves token data as a .bin file, for reading in C.
 
     - First comes a header with 256 int32s
@@ -44,23 +44,24 @@ def write_datafile(file_path: Path, toks: np.ndarray | Sequence[int]):
     """
     assert len(toks) < 2**31, "token count too large"  # ~2.1B tokens
     # construct the header
-    header = np.zeros(256, dtype=np.int32)
+    header = np.zeros(256, dtype=np.int32)  # header is always 256 int32 values
     header[0] = 20240520  # magic
     header[1] = 1  # version
     # number of tokens after the 256*4 bytes of header (each 2 bytes as uint16)
     header[2] = len(toks)
-    # construct the tokens numpy array, if not already
-    if not isinstance(toks, np.ndarray) or toks.dtype != np.uint16:
-        # validate that no token exceeds a uint16
-        maxtok = 2**16
-        assert all(
-            0 <= t < maxtok for t in toks
-        ), "token dictionary too large for uint16"
-        toks_np = np.array(toks, dtype=np.uint16)
+
+    if n_vocab <= 2**16:
+        token_dtype = np.uint16
+    elif n_vocab <= 2**32:
+        token_dtype = np.uint32
     else:
-        toks_np = toks
-    # write to file
-    print(f"writing {len(toks):,} tokens to {file_path}")
+        raise ValueError(f"vocab size {n_vocab} too large for uint16 or uint32")
+    toks_np = np.array(toks, dtype=token_dtype)
+
+    num_bytes = (256 * 4) + (len(toks) * toks_np.itemsize)
+    print(
+        f"writing {len(toks):,} tokens to {file_path} ({num_bytes:,} bytes) in dtype={token_dtype}"
+    )
     with open(file_path, "wb") as f:
         f.write(header.tobytes())
         f.write(toks_np.tobytes())

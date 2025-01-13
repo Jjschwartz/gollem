@@ -23,6 +23,6 @@ from pathlib import Path
 @dataclass
 class DataConfig:
     # Path to the training data.
-    train_data: Path
+    train_data: list[Path]
     # Path to the validation data.
-    val_data: Path | None
+    val_data: list[Path] | None
