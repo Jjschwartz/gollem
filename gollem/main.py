@@ -14,7 +14,7 @@ from gollem.train.core import run
 @dataclass
 class RunConfig:
     # Name of the dataset to use (see `gollem.data.dataset_registry`)
-    dataset: str = field(default="tiny_shakespeare")
+    dataset: str = field(default="tinyshakespeare")
     # Name of the model to use (see `gollem.models.model_registry`)
     model: str = field(default="gpt2")
     # Training configuration
@@ -25,7 +25,7 @@ def main():
     try:
         cfg = pyrallis.parse(config_class=RunConfig)
         pprint(cfg)
-    except Exception as e:
+    except Exception:
         sys.exit(1)
 
     # load model config

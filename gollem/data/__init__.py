@@ -6,7 +6,8 @@ from gollem.data.config import DataConfig
 
 
 dataset_registry = {
-    "tiny_shakespeare": ("tinyshakespeare", "load_data"),
+    "tinyshakespeare": ("tinyshakespeare", "load_data"),
+    "tinystories": ("tinystories", "load_data"),
 }
 
 

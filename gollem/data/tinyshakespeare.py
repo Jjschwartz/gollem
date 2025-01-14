@@ -50,12 +50,8 @@ def tokenize(tokenizer: BaseTokenizer) -> tuple[Path, Path]:
     val_filename = encoder_data_dir / "tiny_shakespeare_val.bin"
     train_filename = encoder_data_dir / "tiny_shakespeare_train.bin"
     if val_filename.exists() and train_filename.exists():
-        retokenize = input(
-            f"Data already exists in {encoder_data_dir}, re-tokenize? (y/n)"
-        )
-        if retokenize.lower() != "y":
-            print("Skipping tokenization...")
-            return val_filename, train_filename
+        print("Tokenized data already exists, skipping tokenization...")
+        return val_filename, train_filename
 
     data_filename = THIS_DATA_CACHE_DIR / "tiny_shakespeare.txt"
     with open(data_filename, "r") as fin:

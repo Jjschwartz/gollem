@@ -1,3 +1,4 @@
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -26,3 +27,17 @@ class DataConfig:
     train_data: list[Path]
     # Path to the validation data.
     val_data: list[Path] | None
+
+    @property
+    def train_data_pattern(self) -> str:
+        # glob pattern for all the train data files
+        parent_path = self.train_data[0].parent
+        return os.path.join(parent_path, "*_train*.bin")
+
+    @property
+    def val_data_pattern(self) -> str | None:
+        # glob pattern for all the val data files
+        if self.val_data is None:
+            return None
+        parent_path = self.val_data[0].parent
+        return os.path.join(parent_path, "*_val*.bin")

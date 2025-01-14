@@ -87,10 +87,10 @@ def run(
     model, optimizer = model_config.get_model_and_optimizer(device=device)
 
     # setup dataloaders
-    train_loader = DataLoader(str(dataset_config.train_data), B, T)
+    train_loader = DataLoader(dataset_config.train_data_pattern, B, T)
     val_loader = None
-    if dataset_config.val_data:
-        val_loader = DataLoader(str(dataset_config.val_data), B, T)
+    if dataset_config.val_data_pattern is not None:
+        val_loader = DataLoader(dataset_config.val_data_pattern, B, T)
 
     # learning rate decay scheduler (cosine with warmup)
     get_lr = model_config.get_lr_scheduler(train_config.num_iterations)

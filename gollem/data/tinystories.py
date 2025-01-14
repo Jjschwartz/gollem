@@ -103,12 +103,8 @@ def tokenize(tokenizer: BaseTokenizer) -> tuple[list[Path], list[Path]]:
     val_filename = encoder_data_dir / "Tinystories_val.bin"
     train_filename = encoder_data_dir / "Tinystories_train.bin"
     if val_filename.exists() and train_filename.exists():
-        retokenize = input(
-            f"Data already exists in {encoder_data_dir}, re-tokenize? (y/n)"
-        )
-        if retokenize.lower() != "y":
-            print("Skipping tokenization...")
-            return [val_filename], [train_filename]
+        print("Tokenized data already exists, skipping tokenization...")
+        return [val_filename], [train_filename]
 
     # shard 0 will be the val split, rest is train
     data_dir = THIS_DATA_CACHE_DIR / "TinyStories_all_data"
