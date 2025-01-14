@@ -1,17 +1,17 @@
 """Utility model config stuff."""
 
 import math
-from dataclasses import asdict
 from dataclasses import dataclass
 from typing import Callable
 from typing import Tuple
 
-import tiktoken
 import torch
 
 from gollem.models.config import ModelConfig
 from gollem.models.gpt2.model import GPT
 from gollem.models.model import BaseLLM
+from gollem.tokenizer import BaseTokenizer
+from gollem.tokenizer import get_tokenizer
 
 
 @dataclass
@@ -48,8 +48,8 @@ class GPT2Config(ModelConfig):
     # Load from pretrained weights
     from_pretrained: bool = False
 
-    def get_tokenizer(self) -> tiktoken.Encoding:
-        return tiktoken.get_encoding("gpt2")
+    def get_tokenizer(self) -> BaseTokenizer:
+        return get_tokenizer("gpt2")
 
     def get_model_and_optimizer(
         self, device: str

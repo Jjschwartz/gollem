@@ -6,7 +6,7 @@ from pathlib import Path
 # Dataset has a couple of levels:
 # 1. Raw data (e.g. text files)
 #    - these are the files that are downloaded from the internet
-#    - identified by a name, e.g. tiny_shakespeare
+#    - identified by a name, e.g. tinyshakespeare
 # 2. Tokenized data (e.g. bin files)
 #    - this is the data tokenized by a specific tokenizer (e.g. tiktoken('gpt2'))
 #    - identified by (dataset_name, tokenizer_name)
@@ -15,10 +15,11 @@ from pathlib import Path
 #    - identified by (dataset_name, tokenizer_name, split_name)
 #
 # For efficiency we may only store the raw data and train/val tokenized data.
-# E.g. For the tiny_shakespeare dataset tokenized with tiktoken-gpt2, we'd get:
-# - tiny_shakespeare.txt
-# - tiny_shakespeare_tiktoken-gpt2_train.bin
-# - tiny_shakespeare_tiktoken-gpt2_val.bin
+# E.g. For the tinyshakespeare dataset tokenized with tiktoken-gpt2, we'd get
+# something like this:
+# - tinyshakespeare/tiny_shakespeare.txt
+# - tinyshakespeare/gpt2/tiny_shakespeare_train.bin
+# - tinyshakespeare/gpt2/tiny_shakespeare_val.bin
 
 
 @dataclass

@@ -1,4 +1,3 @@
-import importlib
 from dataclasses import asdict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -6,8 +5,9 @@ from typing import Callable
 from typing import Self
 from typing import Tuple
 
-import tiktoken
 import torch
+
+from gollem.tokenizer import BaseTokenizer
 
 
 if TYPE_CHECKING:
@@ -27,7 +27,7 @@ class ModelConfig:
     share_embd_params: bool = True
     flash_attention: bool = True
 
-    def get_tokenizer(self) -> tiktoken.Encoding:
+    def get_tokenizer(self) -> BaseTokenizer:
         raise NotImplementedError()
 
     def get_model_and_optimizer(

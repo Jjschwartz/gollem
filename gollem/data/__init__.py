@@ -1,8 +1,7 @@
 import importlib
 
-import tiktoken
-
 from gollem.data.config import DataConfig
+from gollem.tokenizer import BaseTokenizer
 
 
 dataset_registry = {
@@ -13,7 +12,7 @@ dataset_registry = {
 
 def load_dataset(
     name: str,
-    encoder: tiktoken.Encoding,
+    encoder: BaseTokenizer,
 ) -> DataConfig:
     assert name in dataset_registry
     dataset_module_name, load_fn_name = dataset_registry[name]

@@ -92,7 +92,7 @@ class HuggingFaceTokenizer(BaseTokenizer):
 
 
 def get_tokenizer(model_desc: str) -> BaseTokenizer:
-    if model_desc.startswith("gpt-"):
+    if model_desc.startswith("gpt"):
         return TiktokenTokenizer(tiktoken.get_encoding("gpt2"))
     elif "llama-3" in model_desc:
         return HuggingFaceTokenizer(
