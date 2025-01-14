@@ -84,7 +84,7 @@ class HuggingFaceTokenizer(BaseTokenizer):
 
     @property
     def name(self) -> str:
-        return self.tokenizer.name_or_path
+        return self.tokenizer.name_or_path.split("/")[-1]
 
     @cached_property
     def n_vocab(self) -> int:

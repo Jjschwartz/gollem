@@ -63,16 +63,16 @@ def download():
         print(f"{data_filename} already exists, skipping download...")
 
     # unpack the tar.gz file into all the data shards (json files)
-    data_dir = os.path.join(DATA_CACHE_DIR, "TinyStories_all_data")
-    if not os.path.exists(data_dir):
-        os.makedirs(data_dir, exist_ok=True)
+    data_dir = THIS_DATA_CACHE_DIR / "TinyStories_all_data"
+    if not data_dir.exists():
+        data_dir.mkdir(parents=True, exist_ok=True)
         print(f"Unpacking {data_filename}...")
         os.system(f"tar -xzf {data_filename} -C {data_dir}")
     else:
         print(f"{data_dir} already exists, skipping unpacking...")
 
     # print a single example just for debugging and such
-    shard_filenames = sorted(glob.glob(os.path.join(data_dir, "*.json")))
+    shard_filenames = sorted(glob.glob(str(data_dir / "*.json")))
     print("Download done.")
     print(f"Number of shards: {len(shard_filenames)}")
     # with open(shard_filenames[0], "r") as f:
@@ -97,16 +97,24 @@ def process_shard(
 
 
 def tokenize(tokenizer: BaseTokenizer) -> tuple[list[Path], list[Path]]:
+    # check if the data already exists
+    encoder_data_dir = THIS_DATA_CACHE_DIR / tokenizer.name
+    encoder_data_dir.mkdir(exist_ok=True)
+    val_filename = encoder_data_dir / "Tinystories_val.bin"
+    train_filename = encoder_data_dir / "Tinystories_train.bin"
+    if val_filename.exists() and train_filename.exists():
+        retokenize = input(
+            f"Data already exists in {encoder_data_dir}, re-tokenize? (y/n)"
+        )
+        if retokenize.lower() != "y":
+            print("Skipping tokenization...")
+            return [val_filename], [train_filename]
+
     # shard 0 will be the val split, rest is train
     data_dir = THIS_DATA_CACHE_DIR / "TinyStories_all_data"
     shard_filenames = sorted(glob.glob(os.path.join(data_dir, "*.json")))
     val_shards = [shard_filenames[0]]
     train_shards = shard_filenames[1:]
-    encoder_data_dir = THIS_DATA_CACHE_DIR / tokenizer.name
-    encoder_data_dir.mkdir(exist_ok=True)
-
-    val_filenames = []
-    train_filenames = []
     for split_name, split_shards in [("val", val_shards), ("train", train_shards)]:
         print(f"Tokenizing {split_name} split...")
         all_tokens = []
@@ -120,12 +128,8 @@ def tokenize(tokenizer: BaseTokenizer) -> tuple[list[Path], list[Path]]:
 
         split_filename = encoder_data_dir / f"TinyStories_{split_name}.bin"
         write_datafile(split_filename, all_tokens, tokenizer.n_vocab)
-        if split_name == "val":
-            val_filenames.append(split_filename)
-        else:
-            train_filenames.append(split_filename)
 
-    return val_filenames, train_filenames
+    return [val_filename], [train_filename]
 
 
 def load_data(tokenizer: BaseTokenizer) -> DataConfig:
@@ -138,14 +142,17 @@ def load_data(tokenizer: BaseTokenizer) -> DataConfig:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Tiny Stories dataset preprocessing")
+    parser = argparse.ArgumentParser(
+        description="Tiny Stories dataset preprocessing",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
     parser.add_argument(
         "-m",
         "--model_desc",
         type=str,
         default="gpt-2",
         choices=["gpt-2", "llama-3"],
-        help="Model type, gpt-2|llama-3",
+        help="Model type (determines the tokenizer)",
     )
     args = parser.parse_args()
     model_tokenizer = get_tokenizer(args.model_desc)

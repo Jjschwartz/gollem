@@ -45,6 +45,18 @@ def download():
 
 
 def tokenize(tokenizer: BaseTokenizer) -> tuple[Path, Path]:
+    encoder_data_dir = THIS_DATA_CACHE_DIR / tokenizer.name
+    encoder_data_dir.mkdir(exist_ok=True)
+    val_filename = encoder_data_dir / "tiny_shakespeare_val.bin"
+    train_filename = encoder_data_dir / "tiny_shakespeare_train.bin"
+    if val_filename.exists() and train_filename.exists():
+        retokenize = input(
+            f"Data already exists in {encoder_data_dir}, re-tokenize? (y/n)"
+        )
+        if retokenize.lower() != "y":
+            print("Skipping tokenization...")
+            return val_filename, train_filename
+
     data_filename = THIS_DATA_CACHE_DIR / "tiny_shakespeare.txt"
     with open(data_filename, "r") as fin:
         text = fin.read()
@@ -59,11 +71,7 @@ def tokenize(tokenizer: BaseTokenizer) -> tuple[Path, Path]:
     val_tokens = tokens[:32768]
     train_tokens = tokens[32768:]
     # save to file
-    encoder_data_dir = THIS_DATA_CACHE_DIR / tokenizer.name
-    encoder_data_dir.mkdir(exist_ok=True)
 
-    val_filename = encoder_data_dir / "tiny_shakespeare_val.bin"
-    train_filename = encoder_data_dir / "tiny_shakespeare_train.bin"
     write_datafile(val_filename, val_tokens, tokenizer.n_vocab)
     write_datafile(train_filename, train_tokens, tokenizer.n_vocab)
 
@@ -81,7 +89,8 @@ def load_data(tokenizer: BaseTokenizer) -> DataConfig:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Tiny Shakespeare dataset preprocessing"
+        description="Tiny Shakespeare dataset preprocessing",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
         "-m",
@@ -89,7 +98,7 @@ if __name__ == "__main__":
         type=str,
         default="gpt-2",
         choices=["gpt-2", "llama-3"],
-        help="Model type, gpt-2|llama-3",
+        help="Model type (determines the tokenizer)",
     )
     args = parser.parse_args()
     model_tokenizer = get_tokenizer(args.model_desc)
