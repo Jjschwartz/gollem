@@ -132,6 +132,7 @@ def load_data(tokenizer: BaseTokenizer) -> DataConfig:
     download()
     val_filenames, train_filenames = tokenize(tokenizer)
     return DataConfig(
+        name="tinystories",
         train_data=train_filenames,
         val_data=val_filenames,
     )

@@ -77,6 +77,7 @@ def load_data(tokenizer: BaseTokenizer) -> DataConfig:
     download()
     train_filename, val_filename = tokenize(tokenizer)
     return DataConfig(
+        name="tinyshakespeare",
         train_data=[train_filename],
         val_data=[val_filename] if val_filename is not None else None,
     )

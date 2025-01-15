@@ -24,6 +24,8 @@ from pathlib import Path
 
 @dataclass
 class DataConfig:
+    # Name of the dataset
+    name: str
     # Path to the training data.
     train_data: list[Path]
     # Path to the validation data.
