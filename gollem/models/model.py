@@ -22,8 +22,12 @@ class BaseLLM(nn.Module, Generic[ModelConfigT]):
         tokens: torch.Tensor,
         targets: torch.Tensor | None = None,
         return_logits: bool = True,
+        inference: bool = False,
     ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
-        """Forward pass on token idxs, with optional loss computation."""
+        """Forward pass on token idxs, with optional loss computation.
+
+        Returns logits and optional loss.
+        """
         raise NotImplementedError()
 
     @torch.no_grad()

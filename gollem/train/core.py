@@ -1,7 +1,7 @@
 import time
 from contextlib import nullcontext
+from dataclasses import asdict
 from pathlib import Path
-from pprint import pprint
 
 import numpy as np
 import torch
@@ -9,20 +9,9 @@ import torch.version
 
 from gollem.data.config import DataConfig
 from gollem.data.loader import DataLoader
+from gollem.logger import RunLogger
 from gollem.models.config import ModelConfig
 from gollem.train.config import TrainConfig
-
-
-# General experiment workflow
-# Inputs:
-# 1. Select the model (name | config)
-# 2. Select the dataset (name | config)
-# 3. Select the hyperparams (config)
-# Experiment flow:
-# 1. Load the dataset
-#  a. download data if not present
-#  b. tokenize data
-# 4. Run the experiment
 
 
 def run(
@@ -30,31 +19,27 @@ def run(
     model_config: ModelConfig,
     train_config: TrainConfig,
 ):
-    print(f"Running pytorch {torch.version.__version__}")
-    print("\nModel config:")
-    pprint(model_config)
-    print("\nTrain config:")
-    pprint(train_config)
-    print("\nDataset config:")
-    pprint(dataset_config)
+    output_dir = (
+        None if train_config.output_dir == "" else Path(train_config.output_dir)
+    )
+    logger = RunLogger(output_dir=output_dir, use_wandb=train_config.use_wandb)
 
     if train_config.device:
         device = train_config.device
     else:
         device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"Using device: {device}")
     device_type = "cuda" if "cuda" in device else "cpu"
 
-    # calculate the number of gradient accumulation steps from the desired total batch
-    # size and the current run configuration
-    # Having multiple steps allows us to update model with larger batch size than can
-    # be handled by the hardware in a single batch
-    B, T = train_config.batch_size, train_config.seq_len
-    tokens_per_fwdbwd = B * T
-    assert train_config.total_batch_size % tokens_per_fwdbwd == 0
-    grad_accum_steps = train_config.total_batch_size // tokens_per_fwdbwd
-    print(f"Total desired batch size: {train_config.total_batch_size}")
-    print(f"=> calculated gradient accumulation steps: {grad_accum_steps}")
+    logger.log_config(
+        {
+            "pytorch_version": torch.version.__version__,
+            "device": device,
+            "device_type": device_type,
+            "train_config": asdict(train_config),
+            "model_config": asdict(model_config),
+            "dataset_config": asdict(dataset_config),
+        }
+    )
 
     # set up a context manager following the desired dtype and device
     # torch.autocast takes care of mixed-precision, basically setting the precision
@@ -87,22 +72,19 @@ def run(
     model, optimizer = model_config.get_model_and_optimizer(device=device)
 
     # setup dataloaders
-    train_loader = DataLoader(dataset_config.train_data_pattern, B, T)
+    train_loader = DataLoader(
+        dataset_config.train_data_pattern, train_config.batch_size, train_config.seq_len
+    )
     val_loader = None
     if dataset_config.val_data_pattern is not None:
-        val_loader = DataLoader(dataset_config.val_data_pattern, B, T)
+        val_loader = DataLoader(
+            dataset_config.val_data_pattern,
+            train_config.batch_size,
+            train_config.seq_len,
+        )
 
     # learning rate decay scheduler (cosine with warmup)
     get_lr = model_config.get_lr_scheduler(train_config.num_iterations)
-
-    # create the logging directory if it does not exist
-    logfile = None
-    if train_config.output_dir:
-        output_dir = Path(train_config.output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        logfile = output_dir / "main.log"
-        # create the log file "main.log" inside it, and wipe it clean
-        logfile.write_text("")
 
     # reset CUDA memory stats to clear any stats from loading model
     if device == "cuda":
@@ -129,10 +111,7 @@ def run(
                     val_loss += loss.item()
                 val_loss /= train_config.val_max_steps
             # log to console and to file
-            print(f"val loss {val_loss}")
-            if logfile is not None:
-                with open(logfile, "a") as f:
-                    f.write("s:%d tel:%f\n" % (step, val_loss))
+            logger.log_metrics({"val_loss": val_loss}, step=step)
 
         # once in a while perform model inference on the master process
         if train_config.sample_every > 0 and (
@@ -150,9 +129,12 @@ def run(
             yg = model.generate(
                 xg, max_new_tokens, temperature=temperature, top_k=top_k
             )
-            print("---------------")
-            print(enc.decode(yg[0].tolist()))
-            print("---------------")
+            sample_output = [
+                "---------------",
+                enc.decode(yg[0].tolist()),
+                "---------------",
+            ]
+            logger.log("\n".join(sample_output))
 
         # we run an extra step to run eval and sample after model training
         if final_step:
@@ -164,7 +146,7 @@ def run(
         # micro-batch loop where we accumulate gradients for total batch size
         # mean loss over mini-batches
         lossf = 0.0
-        for micro_step in range(grad_accum_steps):
+        for micro_step in range(train_config.grad_accum_steps):
             # fetch a batch
             x, y = train_loader.next_batch()
             x, y = x.to(device), y.to(device)
@@ -175,7 +157,7 @@ def run(
                 # because the gradients just add on each successive backward().
                 # addition of gradients corresponds to a SUM in the objective, but
                 # instead of a SUM we want MEAN, so we scale the loss here
-                loss = loss / grad_accum_steps
+                loss = loss / train_config.grad_accum_steps
                 # keep track of the mean loss
                 lossf += loss.detach().item()
 
@@ -201,19 +183,22 @@ def run(
         # time and print
         t1 = time.time()
         # the 0th iteration is often an outlier (much slower) => skip logging it
-        tokens_per_second = grad_accum_steps * B * T / (t1 - t0)
-        print(
-            f"step {step + 1:4d}/{train_config.num_iterations} "
-            f"| train loss {lossf:.6f} "
-            f"| norm {norm:.4f} "
-            f"| lr {lr:.2e} "
-            f"| ({(t1 - t0) * 1000:.2f} ms "
-            f"| {tokens_per_second:.0f} tok/s)"
+        tokens_per_second = (
+            train_config.grad_accum_steps
+            * train_config.batch_size
+            * train_config.seq_len
+            / (t1 - t0)
         )
-        # log to logile
-        if logfile is not None:
-            with open(logfile, "a") as f:
-                f.write("s:%d trl:%f\n" % (step, lossf))
+        logger.log_metrics(
+            {
+                "train_loss": lossf,
+                "norm": norm,
+                "lr": lr,
+                "tokens_per_second": tokens_per_second,
+                "time_per_step": (t1 - t0) * 1000,
+            },
+            step=step,
+        )
 
         # keep track of smooth timings, last 20 iterations
         if step > 0 and step > train_config.num_iterations - 20:
@@ -223,19 +208,19 @@ def run(
     timings = timings[-20:]
     if len(timings):
         mean_timing = np.mean(timings)
-        mean_tps = grad_accum_steps * B * T / mean_timing
+        mean_tps = (
+            train_config.grad_accum_steps
+            * train_config.batch_size
+            * train_config.seq_len
+            / mean_timing
+        )
     else:
         mean_timing = 0.0
         mean_tps = 0.0
+
+    # TODO track memory usage each iteration
     mem_usage = torch.cuda.max_memory_allocated() // 1024 // 1024
-    print(
+    logger.log(
         f"final {len(timings)} iters avg: {mean_timing * 1000:.3f}ms {mean_tps:.0f} tok/s"
     )
-    print(f"peak mem usage: {mem_usage} MiB")
-
-    # log to logile
-    if logfile is not None:
-        with open(logfile, "a") as f:
-            f.write(
-                "end. timing:%f tps:%f mem:%d\n" % (mean_timing, mean_tps, mem_usage)
-            )
+    logger.log(f"peak mem usage: {mem_usage} MiB")

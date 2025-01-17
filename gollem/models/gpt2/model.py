@@ -177,6 +177,7 @@ class GPT(BaseLLM["GPT2Config"]):
         tokens: torch.Tensor,
         targets: torch.Tensor | None = None,
         return_logits: bool = True,
+        inference: bool = False,
     ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
         """Forward pass on token idxs, with optional loss computation."""
         device = tokens.device
@@ -205,10 +206,13 @@ class GPT(BaseLLM["GPT2Config"]):
             loss = F.cross_entropy(
                 logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1
             )
-        else:
+        elif inference:
             # inference-time mini-optimization: only forward unembed on final position
             # note: using list [-1] to preserve the time dim
             logits = self.lm_head(x[:, [-1], :])
+            loss = None
+        else:
+            logits = self.lm_head(x)
             loss = None
 
         # there are performance reasons why not returning logits is prudent,

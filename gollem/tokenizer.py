@@ -14,10 +14,17 @@ class BaseTokenizer(abc.ABC):
 
     @abc.abstractmethod
     def encode(self, text: str, add_eot: bool = True) -> list[int]:
+        """Encode a string into a list of tokens IDs."""
         pass
 
     @abc.abstractmethod
     def decode(self, tokens: list[int]) -> str:
+        """Decode a list of tokens IDs into a string."""
+        pass
+
+    @abc.abstractmethod
+    def convert_token_ids_to_tokens(self, token_ids: list[int]) -> list[str]:
+        """Convert a list of token IDs to a list of tokens."""
         pass
 
     @property
@@ -49,6 +56,12 @@ class TiktokenTokenizer(BaseTokenizer):
     def decode(self, tokens: list[int]) -> str:
         return self.tokenizer.decode(tokens)
 
+    def convert_token_ids_to_tokens(self, token_ids: list[int]) -> list[str]:
+        token_strs = []
+        for token_id in token_ids:
+            token_strs.append(self.tokenizer.decode([token_id]))
+        return token_strs
+
     @property
     def eot_token(self) -> int:
         return self.tokenizer._special_tokens["<|endoftext|>"]
@@ -67,8 +80,10 @@ class HuggingFaceTokenizer(BaseTokenizer):
         self.tokenizer = tokenizer
 
     def encode(self, text: str, add_eot: bool = True) -> list[int]:
+        # TODO need to check if this is correct/fix it
         assert add_eot, "HuggingFaceTokenizer always adds eot token"
-        # by default the tokenizer adds the EOT token (128000)
+        # by default the tokenizer adds a BOS token (128000) at the beginning
+        # of each sequence
         return self.tokenizer.encode(
             text, add_special_tokens=False, verbose=False, split_special_tokens=True
         )
@@ -76,9 +91,12 @@ class HuggingFaceTokenizer(BaseTokenizer):
     def decode(self, tokens: list[int]) -> str:
         return self.tokenizer.decode(tokens)
 
+    def convert_token_ids_to_tokens(self, token_ids: list[int]) -> list[str]:
+        return self.tokenizer.convert_ids_to_tokens(token_ids)  # type: ignore
+
     @property
     def eot_token(self) -> int:
-        # by default the tokenizer adds the EOT token (128000)
+        # by default the tokenizer adds the BOS token (128000)
         # so we return token for empty string
         return self.tokenizer.encode("")[0]
 
