@@ -38,11 +38,6 @@ from gollem.data.common import download_file
 from gollem.tokenizer import BaseTokenizer
 
 
-# TODO
-# - figure out how to deal with EOT and BOS tokens
-# - write tokenized data to .bin files
-
-
 # -----------------------------------------------------------------------------
 THIS_DATA_CACHE_DIR = DATA_CACHE_DIR / "hellaswag"
 
@@ -67,29 +62,23 @@ def download(split: str) -> None:
 
 def render_example(
     example: dict, tokenizer: BaseTokenizer
-) -> tuple[dict, torch.Tensor, torch.Tensor, int]:
+) -> tuple[torch.Tensor, torch.Tensor, int]:
     """
     Given the example as a dictionary, render it as three torch tensors:
     - tokens (the tokens of context + completion, of size 4xN, as there are always 4 candidates)
     - mask (is 1 in the region of the candidate completion, where we evaluate likelihoods)
     - label (the index of the correct completion, which we hope has the highest likelihood)
+
+    N is the number of tokens in the context + completion of the longest ending.
     """
     ctx = example["ctx"]
     label = example["label"]
     endings = example["endings"]
 
-    # data needed to reproduce this eval on the C size
-    data = {
-        "label": label,
-        "ctx_tokens": None,
-        "ending_tokens": [],
-    }
-
     # TODO figure out how should deal with EOT and BOS tokens
 
     # gather up all the tokens
     ctx_tokens = tokenizer.encode(ctx, add_eot=False)
-    data["ctx_tokens"] = ctx_tokens
     tok_rows = []
     mask_rows = []
     for end in endings:
@@ -98,7 +87,6 @@ def render_example(
         )  # note: prepending " " because GPT-2 tokenizer
         tok_rows.append(ctx_tokens + end_tokens)
         mask_rows.append([0] * len(ctx_tokens) + [1] * len(end_tokens))
-        data["ending_tokens"].append(end_tokens)
 
     # be careful during collation because the number of tokens in each row can differ
     max_len = max(len(row) for row in tok_rows)
@@ -108,7 +96,7 @@ def render_example(
         tokens[i, : len(tok_row)] = torch.tensor(tok_row)
         mask[i, : len(mask_row)] = torch.tensor(mask_row)
 
-    return data, tokens, mask, label
+    return tokens, mask, label
 
 
 def iterate_examples(split: str) -> Iterator[dict]:
@@ -120,21 +108,20 @@ def iterate_examples(split: str) -> Iterator[dict]:
             yield example
 
 
-# if __name__ == "__main__":
-#     import argparse
+if __name__ == "__main__":
+    import argparse
 
-#     parser = argparse.ArgumentParser(
-#         description="HellaSwag dataset preprocessing",
-#         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-#     )
-#     parser.add_argument(
-#         "-m",
-#         "--model_desc",
-#         type=str,
-#         default="gpt-2",
-#         choices=["gpt-2", "llama-3"],
-#         help="Model type (determines the tokenizer)",
-#     )
-#     args = parser.parse_args()
-#     tokenizer = get_model_config(args.model_desc).get_tokenizer()
-#     evaluate(args.model_type, args.device)
+    parser = argparse.ArgumentParser(
+        description="HellaSwag dataset preprocessing",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "-s",
+        "--split",
+        type=str,
+        default="val",
+        choices=["train", "val", "test"],
+        help="Split to download",
+    )
+    args = parser.parse_args()
+    download(args.split)
