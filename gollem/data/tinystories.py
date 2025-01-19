@@ -100,8 +100,8 @@ def tokenize(tokenizer: BaseTokenizer) -> tuple[list[Path], list[Path]]:
     # check if the data already exists
     encoder_data_dir = THIS_DATA_CACHE_DIR / tokenizer.name
     encoder_data_dir.mkdir(exist_ok=True)
-    val_filename = encoder_data_dir / "Tinystories_val.bin"
-    train_filename = encoder_data_dir / "Tinystories_train.bin"
+    val_filename = encoder_data_dir / "TinyStories_val.bin"
+    train_filename = encoder_data_dir / "TinyStories_train.bin"
     if val_filename.exists() and train_filename.exists():
         print("Tokenized data already exists, skipping tokenization...")
         return [val_filename], [train_filename]
