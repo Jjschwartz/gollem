@@ -2,6 +2,7 @@ import time
 from contextlib import nullcontext
 from dataclasses import asdict
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import torch
@@ -18,7 +19,7 @@ def run(
     dataset_config: DataConfig,
     model_config: ModelConfig,
     train_config: TrainConfig,
-):
+) -> dict[str, Any]:
     output_dir = (
         None if train_config.output_dir == "" else Path(train_config.output_dir)
     )
@@ -224,3 +225,9 @@ def run(
         f"final {len(timings)} iters avg: {mean_timing * 1000:.3f}ms {mean_tps:.0f} tok/s"
     )
     logger.log(f"peak mem usage: {mem_usage} MiB")
+
+    return {
+        "mean_iter_time": mean_timing,
+        "mean_tps": mean_tps,
+        "peak_mem_usage": mem_usage,
+    }

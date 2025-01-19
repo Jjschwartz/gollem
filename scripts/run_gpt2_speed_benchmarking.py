@@ -9,7 +9,6 @@ from pathlib import Path
 from pprint import pprint
 from typing import Any
 
-import torch
 from gollem.data import load_dataset
 from gollem.models.gpt2.config import GPT2_CONFIG
 from gollem.models.gpt2.config import GPT2Config
@@ -81,8 +80,6 @@ def get_run_name(train_kwargs: dict[str, Any], model_kwargs: dict[str, Any]) -> 
 
 
 def run_benchmark(debug: bool = False):
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-
     time_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     results_file_path = RESULTS_DIR / f"results_{time_str}.csv"
     results_file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -96,12 +93,7 @@ def run_benchmark(debug: bool = False):
     total_num_runs = len(train_settings) * len(model_settings)
     print(f"Total number of runs: {total_num_runs}")
 
-    result_headers = ["run_name", "time", "mean_tps", "peak_mem_usage"]
-    if not debug:
-        with open(results_file_path, "w") as output_file:
-            results_writer = csv.DictWriter(output_file, fieldnames=result_headers)
-            results_writer.writeheader()
-
+    result_headers = []
     for i, (train_kwargs, model_kwargs) in enumerate(
         itertools.product(train_settings, model_settings)
     ):
@@ -120,36 +112,32 @@ def run_benchmark(debug: bool = False):
         print("=" * 100)
         print(f"Run {i + 1}/{total_num_runs}: {run_name}")
         print("=" * 100)
+        if debug:
+            continue
 
-        if not debug:
-            start_time = time.time()
-            run(DATASET_CONFIG, model_config, train_config)
-            end_time = time.time()
-            time_taken = end_time - start_time
-        else:
-            time_taken = 1000
+        start_time = time.time()
+        run_results = run(DATASET_CONFIG, model_config, train_config)
+        end_time = time.time()
+        time_taken = end_time - start_time
 
-        num_tokens = train_config.total_batch_size * train_config.num_iterations
-        mean_tps = num_tokens / time_taken
-        if device == "cuda":
-            peak_mem_usage = torch.cuda.max_memory_allocated() // 1024 // 1024
-        else:
-            peak_mem_usage = 0
+        print(f"Time={time_taken:.2f}s")
+        pprint(run_results)
 
-        print(
-            f"Time={time_taken:.2f}s, TPS={mean_tps:.2f}, peak mem usage={peak_mem_usage}MB"
-        )
-        if not debug:
-            with open(results_file_path, "a") as output_file:
+        if not result_headers:
+            result_headers = ["run_name", "total_time"] + list(run_results.keys())
+            with open(results_file_path, "w") as output_file:
                 results_writer = csv.DictWriter(output_file, fieldnames=result_headers)
-                results_writer.writerow(
-                    {
-                        "run_name": run_name,
-                        "time": time_taken,
-                        "mean_tps": mean_tps,
-                        "peak_mem_usage": peak_mem_usage,
-                    }
-                )
+                results_writer.writeheader()
+
+        with open(results_file_path, "a") as output_file:
+            results_writer = csv.DictWriter(output_file, fieldnames=result_headers)
+            results_writer.writerow(
+                {
+                    "run_name": run_name,
+                    "total_time": time_taken,
+                    **run_results,
+                }
+            )
 
 
 if __name__ == "__main__":
