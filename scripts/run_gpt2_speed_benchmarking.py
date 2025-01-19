@@ -96,53 +96,60 @@ def run_benchmark(debug: bool = False):
     total_num_runs = len(train_settings) * len(model_settings)
     print(f"Total number of runs: {total_num_runs}")
 
-    with open(results_file_path, "w") as output_file:
-        result_headers = ["run_name", "time", "mean_tps", "peak_mem_usage"]
-        results_writer = csv.DictWriter(output_file, fieldnames=result_headers)
-        results_writer.writeheader()
+    result_headers = ["run_name", "time", "mean_tps", "peak_mem_usage"]
+    if not debug:
+        with open(results_file_path, "w") as output_file:
+            results_writer = csv.DictWriter(output_file, fieldnames=result_headers)
+            results_writer.writeheader()
 
-        for i, (train_kwargs, model_kwargs) in enumerate(
-            itertools.product(train_settings, model_settings)
-        ):
-            base_train_kwargs = asdict(BASE_TRAIN_CONFIG)
-            base_train_kwargs.update(train_kwargs)
-            base_train_kwargs.pop("grad_accum_steps")
+    for i, (train_kwargs, model_kwargs) in enumerate(
+        itertools.product(train_settings, model_settings)
+    ):
+        base_train_kwargs = asdict(BASE_TRAIN_CONFIG)
+        base_train_kwargs.update(train_kwargs)
+        base_train_kwargs.pop("grad_accum_steps")
 
-            train_config = TrainConfig(**base_train_kwargs)
-            train_config = TrainConfig(**base_train_kwargs)
-            base_model_kwargs = asdict(BASE_MODEL_CONFIG)
-            base_model_kwargs.update(model_kwargs)
-            model_config = GPT2Config(**base_model_kwargs)
+        train_config = TrainConfig(**base_train_kwargs)
+        train_config = TrainConfig(**base_train_kwargs)
+        base_model_kwargs = asdict(BASE_MODEL_CONFIG)
+        base_model_kwargs.update(model_kwargs)
+        model_config = GPT2Config(**base_model_kwargs)
 
-            run_name = get_run_name(train_kwargs, model_kwargs)
+        run_name = get_run_name(train_kwargs, model_kwargs)
 
-            print("=" * 100)
-            print(f"Run {i + 1}/{total_num_runs}: {run_name}")
-            print("=" * 100)
+        print("=" * 100)
+        print(f"Run {i + 1}/{total_num_runs}: {run_name}")
+        print("=" * 100)
 
-            if not debug:
-                start_time = time.time()
-                run(DATASET_CONFIG, model_config, train_config)
-                end_time = time.time()
-                time_taken = end_time - start_time
-            else:
-                time_taken = 1000
+        if not debug:
+            start_time = time.time()
+            run(DATASET_CONFIG, model_config, train_config)
+            end_time = time.time()
+            time_taken = end_time - start_time
+        else:
+            time_taken = 1000
 
-            num_tokens = train_config.total_batch_size * train_config.num_iterations
-            mean_tps = num_tokens / time_taken
-            if device == "cuda":
-                peak_mem_usage = torch.cuda.max_memory_allocated() // 1024 // 1024
-            else:
-                peak_mem_usage = 0
+        num_tokens = train_config.total_batch_size * train_config.num_iterations
+        mean_tps = num_tokens / time_taken
+        if device == "cuda":
+            peak_mem_usage = torch.cuda.max_memory_allocated() // 1024 // 1024
+        else:
+            peak_mem_usage = 0
 
-            results_writer.writerow(
-                {
-                    "run_name": run_name,
-                    "time": time_taken,
-                    "mean_tps": mean_tps,
-                    "peak_mem_usage": peak_mem_usage,
-                }
-            )
+        print(
+            f"Time={time_taken:.2f}s, TPS={mean_tps:.2f}, peak mem usage={peak_mem_usage}MB"
+        )
+        if not debug:
+            with open(results_file_path, "a") as output_file:
+                results_writer = csv.DictWriter(output_file, fieldnames=result_headers)
+                results_writer.writerow(
+                    {
+                        "run_name": run_name,
+                        "time": time_taken,
+                        "mean_tps": mean_tps,
+                        "peak_mem_usage": peak_mem_usage,
+                    }
+                )
 
 
 if __name__ == "__main__":
