@@ -6,6 +6,7 @@ import time
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
+from pprint import pprint
 from typing import Any
 from typing import Iterable
 
@@ -64,13 +65,16 @@ def get_all_settings_combos(
     param_names: list[str] = [x[0] for x in settings]
     for param_value_combination in itertools.product(*[x[1] for x in settings]):
         all_settings.append(dict(zip(param_names, param_value_combination)))
-    print(all_settings)
     return all_settings
 
 
 def get_all_config_combinations() -> Iterable[tuple[dict[str, Any], dict[str, Any]]]:
     train_settings = get_all_settings_combos(get_train_settings_to_test())
+    print("Train settings:")
+    pprint(train_settings)
     model_settings = get_all_settings_combos(get_model_settings_to_test())
+    print("Model settings:")
+    pprint(model_settings)
     return itertools.product(train_settings, model_settings)
 
 
@@ -86,7 +90,7 @@ def get_run_name(train_kwargs: dict[str, Any], model_kwargs: dict[str, Any]) -> 
     return "_".join(setting_names)
 
 
-def run_benchmark():
+def run_benchmark(debug: bool = False):
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     time_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -115,10 +119,13 @@ def run_benchmark():
             print(f"Running {run_name}")
             print("=" * 100)
 
-            start_time = time.time()
-            run(DATASET_CONFIG, model_config, train_config)
-            end_time = time.time()
-            time_taken = end_time - start_time
+            if not debug:
+                start_time = time.time()
+                run(DATASET_CONFIG, model_config, train_config)
+                end_time = time.time()
+                time_taken = end_time - start_time
+            else:
+                time_taken = 1000
 
             num_tokens = train_config.total_batch_size * train_config.num_iterations
             mean_tps = num_tokens / time_taken
@@ -138,4 +145,9 @@ def run_benchmark():
 
 
 if __name__ == "__main__":
-    run_benchmark()
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--debug", action="store_true")
+    args = parser.parse_args()
+    run_benchmark(args.debug)
