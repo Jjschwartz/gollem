@@ -95,6 +95,10 @@ GPT2_CONFIG = GPT2Config(
     n_head=12,
     d_model=768,
     d_mlp=4 * 768,
+    learning_rate=0.0006,
+    warmup_iters=700,
+    learning_rate_decay_frac=0.0,
+    weight_decay=0.1,
 )
 # 350M params
 GPT2_MEDIUM_CONFIG = GPT2Config(

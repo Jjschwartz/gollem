@@ -25,8 +25,6 @@ class ModelConfig:
     vocab_size: int = 50257
     ln_bias: bool = False
     mlp_bias: bool = False
-    share_embd_params: bool = True
-    flash_attention: bool = True
 
     def get_tokenizer(self) -> BaseTokenizer:
         raise NotImplementedError()

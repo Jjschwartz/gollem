@@ -15,7 +15,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from gollem.models.config import ModelConfig
 from gollem.models.model import BaseLLM
 
 
@@ -26,7 +25,7 @@ if TYPE_CHECKING:
 class Attention(nn.Module):
     """Multi-head causal attention."""
 
-    def __init__(self, cfg: ModelConfig):
+    def __init__(self, cfg: "GPT2Config"):
         super().__init__()
         self.cfg = cfg
         # query, key, value projections for all heads, batched together
@@ -67,7 +66,7 @@ class Attention(nn.Module):
 
         # compute and rescale attention scores
         # attn_scores: (B, n_head, T, T)
-        if self.cfg.flash_attention:
+        if self.cfg.flash:
             # flash attention
             # handles default scaling of 1/sqrt(d_head)
             z = F.scaled_dot_product_attention(q, k, v, is_causal=True)
@@ -94,7 +93,7 @@ class Attention(nn.Module):
 
 
 class MLP(nn.Module):
-    def __init__(self, cfg: ModelConfig):
+    def __init__(self, cfg: "GPT2Config"):
         super().__init__()
         self.cfg = cfg
         self.c_fc = nn.Linear(cfg.d_model, cfg.d_mlp)
@@ -111,7 +110,7 @@ class MLP(nn.Module):
 
 
 class TransformerBlock(nn.Module):
-    def __init__(self, cfg: ModelConfig):
+    def __init__(self, cfg: "GPT2Config"):
         super().__init__()
         self.ln_1 = nn.LayerNorm(cfg.d_model)
         self.attn = Attention(cfg)
