@@ -8,7 +8,6 @@ from datetime import datetime
 from pathlib import Path
 from pprint import pprint
 from typing import Any
-from typing import Iterable
 
 import torch
 from gollem.data import load_dataset
@@ -41,23 +40,6 @@ THIS_DIR = Path(__file__).parent
 RESULTS_DIR = THIS_DIR.parent / "results" / "gpt2_speed_benchmarking"
 
 
-def get_train_settings_to_test() -> list[tuple[str, list[Any]]]:
-    settings: list[tuple[str, list[Any]]] = [
-        ("dtype", check_dtype_support()),
-    ]
-    if check_tensorcores_support():
-        settings.append(("tensorcores", [True, False]))
-    return settings
-
-
-def get_model_settings_to_test() -> list[tuple[str, list[Any]]]:
-    return [
-        ("compile", [True, False]),
-        ("flash", [True, False]),
-        ("fused_adamw", [True, False]),
-    ]
-
-
 def get_all_settings_combos(
     settings: list[tuple[str, list[Any]]],
 ) -> list[dict[str, Any]]:
@@ -68,14 +50,22 @@ def get_all_settings_combos(
     return all_settings
 
 
-def get_all_config_combinations() -> Iterable[tuple[dict[str, Any], dict[str, Any]]]:
-    train_settings = get_all_settings_combos(get_train_settings_to_test())
-    print("Train settings:")
-    pprint(train_settings)
-    model_settings = get_all_settings_combos(get_model_settings_to_test())
-    print("Model settings:")
-    pprint(model_settings)
-    return itertools.product(train_settings, model_settings)
+def get_train_settings_to_test() -> list[dict[str, Any]]:
+    settings: list[tuple[str, list[Any]]] = [
+        ("dtype", check_dtype_support()),
+    ]
+    if check_tensorcores_support():
+        settings.append(("tensorcores", [True, False]))
+    return get_all_settings_combos(settings)
+
+
+def get_model_settings_to_test() -> list[dict[str, Any]]:
+    settings = [
+        ("compile", [True, False]),
+        ("flash", [True, False]),
+        ("fused_adamw", [True, False]),
+    ]
+    return get_all_settings_combos(settings)
 
 
 def get_run_name(train_kwargs: dict[str, Any], model_kwargs: dict[str, Any]) -> str:
@@ -97,12 +87,23 @@ def run_benchmark(debug: bool = False):
     results_file_path = RESULTS_DIR / f"results_{time_str}.csv"
     results_file_path.parent.mkdir(parents=True, exist_ok=True)
 
+    train_settings = get_train_settings_to_test()
+    print("Train settings:")
+    pprint(train_settings)
+    model_settings = get_model_settings_to_test()
+    print("Model settings:")
+    pprint(model_settings)
+    total_num_runs = len(train_settings) * len(model_settings)
+    print(f"Total number of runs: {total_num_runs}")
+
     with open(results_file_path, "w") as output_file:
         result_headers = ["run_name", "time", "mean_tps", "peak_mem_usage"]
         results_writer = csv.DictWriter(output_file, fieldnames=result_headers)
         results_writer.writeheader()
 
-        for train_kwargs, model_kwargs in get_all_config_combinations():
+        for i, (train_kwargs, model_kwargs) in enumerate(
+            itertools.product(train_settings, model_settings)
+        ):
             base_train_kwargs = asdict(BASE_TRAIN_CONFIG)
             base_train_kwargs.update(train_kwargs)
             base_train_kwargs.pop("grad_accum_steps")
@@ -116,7 +117,7 @@ def run_benchmark(debug: bool = False):
             run_name = get_run_name(train_kwargs, model_kwargs)
 
             print("=" * 100)
-            print(f"Running {run_name}")
+            print(f"Run {i + 1}/{total_num_runs}: {run_name}")
             print("=" * 100)
 
             if not debug:
