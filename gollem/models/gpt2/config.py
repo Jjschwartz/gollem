@@ -40,7 +40,7 @@ class GPT2Config(ModelConfig):
     learning_rate: float = 1e-4
     # Learning rate warmup iterations.
     warmup_iters: int = 0
-    # Learning rate decay fraction.
+    # Learning rate decay fraction (final learning rate = learning_rate * learning_rate_decay_frac).
     learning_rate_decay_frac: float = 1.0
     # Weight decay.
     weight_decay: float = 0.0
