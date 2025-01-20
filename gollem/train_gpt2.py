@@ -23,9 +23,12 @@ class RunConfig:
 
 def main():
     try:
+        print("Parsing config")
         cfg = pyrallis.parse(config_class=RunConfig)
         pprint(cfg)
-    except Exception:
+    except Exception as e:
+        print("Failed to parse config")
+        print(e)
         sys.exit(1)
 
     model_cfg = cfg.model
