@@ -43,7 +43,7 @@ uv run python gollem/train_gpt2.py \
     --model.from_pretrained False \
     --train.output_dir results/gpt2_tinystories \
     --train.seed 42 \
-    --train.batch_size 32 \
+    --train.batch_size 16 \
     --train.seq_len 1024 \
     --train.total_batch_size 524288 \
     --train.num_iterations 1766 \
