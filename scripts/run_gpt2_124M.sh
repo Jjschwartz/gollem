@@ -50,6 +50,7 @@ uv run python gollem/train_gpt2.py \
     --train.val_loss_every 250 \
     --train.val_max_steps 20 \
     --train.sample_every 0 \
+    --train.save_every 500 \
     --train.device auto \
     --train.dtype float16 \
     --train.tensorcores True \
