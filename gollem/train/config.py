@@ -1,4 +1,5 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from dataclasses import field
 from typing import Literal
 
 
@@ -28,8 +29,8 @@ class TrainConfig:
     sample_every: int = 0
 
     # Device and memory management and optimization options
-    # Device to use (autodetect by default).
-    device: str = ""
+    # Device to use (autodetect by default, if empty or set to "auto").
+    device: str = "auto"
     # Dtype to use for model
     dtype: Literal["float32", "float16", "bfloat16"] = "float32"
     # Use GPU tensorcores.

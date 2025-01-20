@@ -25,7 +25,7 @@ def run(
     )
     logger = RunLogger(output_dir=output_dir, use_wandb=train_config.use_wandb)
 
-    if train_config.device:
+    if train_config.device and train_config.device != "auto":
         device = train_config.device
     else:
         device = "cuda" if torch.cuda.is_available() else "cpu"

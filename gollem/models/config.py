@@ -16,6 +16,8 @@ if TYPE_CHECKING:
 
 @dataclass
 class ModelConfig:
+    model_name: str
+
     def get_tokenizer(self) -> BaseTokenizer:
         raise NotImplementedError()
 
