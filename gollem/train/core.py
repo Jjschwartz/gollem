@@ -205,6 +205,15 @@ def run(
         if step > 0 and step > train_config.num_iterations - 20:
             timings.append(t1 - t0)
 
+        if (
+            output_dir is not None
+            and step > 1
+            and train_config.save_every > 0
+            and step % train_config.save_every == 0
+        ):
+            logger.log(f"saving model to {output_dir}/model_s{step}.pt")
+            model.save_model(model, f"{output_dir}/model_s{step}.pt")
+
     # print the average of the last 20 timings, to get something smooth-ish
     timings = timings[-20:]
     if len(timings):
@@ -219,12 +228,18 @@ def run(
         mean_timing = 0.0
         mean_tps = 0.0
 
-    # TODO track memory usage each iteration
+    # TODO track memory usage each iteration (??)
     mem_usage = torch.cuda.max_memory_allocated() // 1024 // 1024
     logger.log(
         f"final {len(timings)} iters avg: {mean_timing * 1000:.3f}ms {mean_tps:.0f} tok/s"
     )
     logger.log(f"peak mem usage: {mem_usage} MiB")
+
+    if output_dir is not None and train_config.save_every > 0:
+        logger.log(
+            f"saving final model to {output_dir}/model_s{train_config.num_iterations}.pt"
+        )
+        model.save_model(model, f"{output_dir}/model_s{train_config.num_iterations}.pt")
 
     return {
         "mean_iter_time": mean_timing,

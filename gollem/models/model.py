@@ -77,3 +77,20 @@ class BaseLLM(nn.Module, Generic[ModelConfigT]):
     @classmethod
     def from_pretrained(cls, config: ModelConfigT) -> Self:
         raise NotImplementedError()
+
+    @classmethod
+    def save_model(cls, model: Self, path: str):
+        data = {
+            "model_state_dict": model.state_dict(),
+            "config": model.cfg,
+        }
+        torch.save(data, path)
+
+    @classmethod
+    def load_model(cls, path: str, device: str | None = None) -> Self:
+        data = torch.load(path, map_location=device, weights_only=False)
+        # Note we need to do it this way since the model may have been compiled
+        # which results in a different state dict structure to the original model
+        model = data["config"].get_model_and_optimizer(device)[0]
+        model.load_state_dict(data["model_state_dict"])
+        return model

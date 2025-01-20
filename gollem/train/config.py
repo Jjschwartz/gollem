@@ -27,6 +27,8 @@ class TrainConfig:
     val_max_steps: int = 20
     # How often to sample from the model.
     sample_every: int = 0
+    # Whether to save the model checkpoint.
+    save_every: int = 0
 
     # Device and memory management and optimization options
     # Device to use (autodetect by default, if empty or set to "auto").

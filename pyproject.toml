@@ -28,6 +28,7 @@ dependencies = [
 dev = [
     "ipykernel>=6.29.5",
     "pyright>=1.1.391",
+    "pytest>=8.3.4",
     "ruff>=0.8.4",
 ]
 
