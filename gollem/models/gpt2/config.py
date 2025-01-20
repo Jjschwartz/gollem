@@ -61,7 +61,7 @@ class GPT2Config(ModelConfig):
 
         if self.compile:
             print("compiling the model...")
-            torch.compile(model)
+            model = torch.compile(model)  # type: ignore
 
         return model, optimizer
 
