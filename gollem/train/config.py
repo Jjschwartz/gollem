@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 from dataclasses import field
-from typing import Literal
 
 
 @dataclass
@@ -33,8 +32,8 @@ class TrainConfig:
     # Device and memory management and optimization options
     # Device to use (autodetect by default, if empty or set to "auto").
     device: str = "auto"
-    # Dtype to use for model
-    dtype: Literal["float32", "float16", "bfloat16"] = "float32"
+    # Dtype to use for model (float32, float16, bfloat16).
+    dtype: str = "float32"
     # Use GPU tensorcores.
     tensorcores: bool = False
 
@@ -51,3 +50,5 @@ class TrainConfig:
         tokens_per_fwdbwd = B * T
         assert self.total_batch_size % tokens_per_fwdbwd == 0
         self.grad_accum_steps = self.total_batch_size // tokens_per_fwdbwd
+
+        assert self.dtype in ["float32", "float16", "bfloat16"]
