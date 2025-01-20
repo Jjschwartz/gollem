@@ -19,8 +19,8 @@ class TrainConfig:
     # Number of training iterations (i.e. batches of `total_batch_size`).
     num_iterations: int = 10
     # Number of gradient accumulation steps (i.e. minibatches).
-    grad_accum_steps: int = field(init=False)
-    # Evaluation
+    # This will be calculated automatically (whether set or not).
+    grad_accum_steps: int = field(default=-1)
     # Every how many steps to evaluate val loss.
     val_loss_every: int = 0
     # How many batches of val to average.
