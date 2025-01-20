@@ -21,7 +21,7 @@
 # - num_iterations = 925653391 / 524288 = 1766
 # - changed warmup_iters to 70 (i.e. 10% of 700, since dataset is 10% of 10B)
 echo "Running GPT2 124M model"
-python gollem/train_gpt2.py \
+uv run python gollem/train_gpt2.py \
     --dataset tinystories \
     --model.model_name gpt2_124M \
     --model.n_ctx 1024 \

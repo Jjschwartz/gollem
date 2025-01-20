@@ -4,6 +4,7 @@ from dataclasses import field
 from pprint import pprint
 
 import pyrallis
+
 from gollem.data import load_dataset
 from gollem.models.gpt2.config import GPT2Config
 from gollem.train.config import TrainConfig
@@ -12,7 +13,7 @@ from gollem.train.core import run
 
 @dataclass
 class RunConfig:
-    # Name of the dataset to use (see `gollem.data.dataset_registry`)
+    # Name of the dataset to use (see `gollem.data.__init__.py`)
     dataset: str = field(default="tinyshakespeare")
     # GPT2Config
     model: GPT2Config = field(default_factory=GPT2Config)
