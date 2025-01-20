@@ -37,13 +37,13 @@ class GPT2Config(ModelConfig):
     # adamw beta params
     betas: Tuple[float, float] = (0.9, 0.95)
     # Use fused version of AdamW optimizer.
-    fused_adamw: bool = False
+    fused_adamw: bool = True
 
     # Model performance options
     # Use flash attention.
-    flash: bool = False
+    flash: bool = True
     # Torch.compile the model.
-    compile: bool = False
+    compile: bool = True
 
     # Load from pretrained weights
     from_pretrained: bool = False
