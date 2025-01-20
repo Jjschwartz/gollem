@@ -16,16 +16,6 @@ if TYPE_CHECKING:
 
 @dataclass
 class ModelConfig:
-    model_name: str
-    n_ctx: int = 1024
-    n_layer: int = 12
-    n_head: int = 12
-    d_model: int = 768
-    d_mlp: int = 4 * 768
-    vocab_size: int = 50257
-    ln_bias: bool = False
-    mlp_bias: bool = False
-
     def get_tokenizer(self) -> BaseTokenizer:
         raise NotImplementedError()
 

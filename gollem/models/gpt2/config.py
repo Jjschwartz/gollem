@@ -16,14 +16,26 @@ from gollem.tokenizer import get_tokenizer
 
 @dataclass
 class GPT2Config(ModelConfig):
+    # Name of the model
     model_name: str = "gpt2"
+    # Context length
     n_ctx: int = 1024
+    # Number of layers
+    n_layer: int = 12
+    # Number of attention heads
+    n_head: int = 12
+    # Model dimension
+    d_model: int = 768
+    # MLP dimension
+    d_mlp: int = 4 * 768
+    # Vocabulary size
     vocab_size: int = 50257
+    # Whether to use layer normalization bias
     ln_bias: bool = True
+    # Whether to use MLP bias
     mlp_bias: bool = True
+    # Whether to share embedding parameters
     share_embd_params: bool = True
-
-    # Optimizer hyper params
     # Learning rate.
     learning_rate: float = 1e-4
     # Learning rate warmup iterations.
@@ -38,13 +50,10 @@ class GPT2Config(ModelConfig):
     betas: Tuple[float, float] = (0.9, 0.95)
     # Use fused version of AdamW optimizer.
     fused_adamw: bool = True
-
-    # Model performance options
     # Use flash attention.
     flash: bool = True
     # Torch.compile the model.
     compile: bool = True
-
     # Load from pretrained weights
     from_pretrained: bool = False
 
@@ -63,7 +72,7 @@ class GPT2Config(ModelConfig):
             print("compiling the model...")
             model = torch.compile(model)  # type: ignore
 
-        return model, optimizer
+        return model, optimizer  # type: ignore
 
     def get_lr_scheduler(self, num_iterations: int) -> Callable[[int], float]:
         def get_lr(it: int) -> float:
