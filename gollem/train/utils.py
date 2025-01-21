@@ -17,7 +17,7 @@ def check_dtype_support() -> list[str]:
         capabilities = torch.cuda.get_device_capability()
         if capabilities >= (7, 0):  # Volta and newer support tensor cores
             supported_dtypes.append("float16")
-        if capabilities >= (8, 0):  # Ampere and newer support bfloat16
+        if torch.cuda.is_bf16_supported():  # Ampere and newer support bfloat16
             supported_dtypes.append("bfloat16")
 
     print(f"Supported dtypes on {device}: {supported_dtypes}")
