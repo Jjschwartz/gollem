@@ -34,7 +34,7 @@ uv run python gollem/train_gpt2.py \
     --model.mlp_bias True \
     --model.share_embd_params True \
     --model.learning_rate 0.0006 \
-    --model.warmup_iters 70 \
+    --model.warmup_iters 700 \
     --model.learning_rate_decay_frac 0.0 \
     --model.weight_decay 0.1 \
     --model.fused_adamw True \
@@ -52,7 +52,7 @@ uv run python gollem/train_gpt2.py \
     --train.sample_every 0 \
     --train.save_every 500 \
     --train.device auto \
-    --train.dtype float16 \
+    --train.dtype bfloat16 \
     --train.tensorcores True \
     --train.use_wandb True
 
