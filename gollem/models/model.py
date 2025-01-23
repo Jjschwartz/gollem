@@ -86,7 +86,7 @@ class BaseLLM(nn.Module, Generic[ModelConfigT]):
         torch.save(data, path)
 
 
-def load_model(path: str, device: str | torch.device | None = None) -> BaseLLM:
+def load_model(path: str, device: str | torch.device) -> BaseLLM:
     data = torch.load(path, map_location=device, weights_only=False)
     # Note we need to do it this way since the model may have been compiled
     # which results in a different state dict structure to the original model

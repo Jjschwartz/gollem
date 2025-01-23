@@ -50,7 +50,9 @@ def iterate_examples_batch(
 
 
 @torch.no_grad()
-def evaluate(model: BaseLLM, device: str | torch.device, batch_size: int = 4):
+def evaluate(
+    model: BaseLLM, device: str | torch.device, batch_size: int = 4, split: str = "val"
+):
     torch.set_float32_matmul_precision("high")  # use tf32
 
     tokenizer = model.cfg.get_tokenizer()
@@ -63,7 +65,7 @@ def evaluate(model: BaseLLM, device: str | torch.device, batch_size: int = 4):
     start_time = time.time()
     model_times = []
     for batch_num, batch in enumerate(
-        iterate_examples_batch("val", tokenizer, device, batch_size)
+        iterate_examples_batch(split, tokenizer, device, batch_size)
     ):
         examples, tokens, mask, labels = batch
         # tokens = (B*C, S)
@@ -122,9 +124,6 @@ def evaluate(model: BaseLLM, device: str | torch.device, batch_size: int = 4):
                 print(f"{i} (loss: {avg_loss[i].item():.4f}) {end}")
             print(f"predicted: {pred_norm[0]}, actual: {labels[0]}")
 
-        if num_total > 100:
-            break
-
     end_time = time.time()
     print(f"Total time taken: {end_time - start_time:.4f} seconds")
     print(f"Model time taken: {sum(model_times):.4f} seconds")
@@ -132,17 +131,17 @@ def evaluate(model: BaseLLM, device: str | torch.device, batch_size: int = 4):
 
 
 def run_eval_from_model_checkpoint(
-    checkpoint_path: str, device: str | torch.device | None = None, batch_size: int = 4
+    checkpoint_path: str, device: str | torch.device | None, batch_size: int = 4, split: str = "val"
 ):
-    model = load_model(checkpoint_path, device)
-
     if device is None:
-        device = next(model.parameters()).device
-    evaluate(model, device, batch_size)
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    model = load_model(checkpoint_path, device)
+    evaluate(model, device, batch_size, split)
 
 
 def run_eval_from_model_desc(
-    model_desc: str, device: str | torch.device | None = None, batch_size: int = 4
+    model_desc: str, device: str | torch.device | None = None, batch_size: int = 4, split: str = "val"
 ):
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -160,11 +159,12 @@ if __name__ == "__main__":
     parser.add_argument("-d", "--device", type=str, default=None)
     parser.add_argument("-b", "--batch_size", type=int, default=4)
     parser.add_argument("-c", "--checkpoint_path", type=str, default=None)
+    parser.add_argument("-s", "--split", type=str, default="val", choices=["val", "test", "train"])
     args = parser.parse_args()
 
     if args.checkpoint_path:
         run_eval_from_model_checkpoint(
-            args.checkpoint_path, args.device, args.batch_size
+            args.checkpoint_path, args.device, args.batch_size, args.split
         )
     else:
-        run_eval_from_model_desc(args.model_desc, args.device, args.batch_size)
+        run_eval_from_model_desc(args.model_desc, args.device, args.batch_size, args.split)
