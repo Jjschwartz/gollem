@@ -22,7 +22,7 @@ class ModelConfig:
         raise NotImplementedError()
 
     def get_model_and_optimizer(
-        self, device: str
+        self, device: str | torch.device
     ) -> Tuple["BaseLLM", torch.optim.Optimizer]:
         raise NotImplementedError()
 

@@ -8,6 +8,7 @@ from gollem.data.hellaswag import iterate_examples
 from gollem.data.hellaswag import render_example
 from gollem.models import get_model_config
 from gollem.models.model import BaseLLM
+from gollem.models.model import load_model
 from gollem.tokenizer import BaseTokenizer
 
 
@@ -130,20 +131,40 @@ def evaluate(model: BaseLLM, device: str | torch.device, batch_size: int = 4):
     print(f"Model / total: {sum(model_times) / (end_time - start_time):.4f}")
 
 
+def run_eval_from_model_checkpoint(
+    checkpoint_path: str, device: str | torch.device | None = None, batch_size: int = 4
+):
+    model = load_model(checkpoint_path, device)
+
+    if device is None:
+        device = next(model.parameters()).device
+    evaluate(model, device, batch_size)
+
+
+def run_eval_from_model_desc(
+    model_desc: str, device: str | torch.device | None = None, batch_size: int = 4
+):
+    if device is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    model_cfg = get_model_config(model_desc)
+    model = model_cfg.get_model_and_optimizer(device)[0]
+    evaluate(model, device, batch_size)
+
+
 if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("-m", "--model_desc", type=str, required=True)
+    parser.add_argument("-m", "--model_desc", type=str, default=None)
     parser.add_argument("-d", "--device", type=str, default=None)
     parser.add_argument("-b", "--batch_size", type=int, default=4)
+    parser.add_argument("-c", "--checkpoint_path", type=str, default=None)
     args = parser.parse_args()
 
-    if args.device:
-        device = args.device
+    if args.checkpoint_path:
+        run_eval_from_model_checkpoint(
+            args.checkpoint_path, args.device, args.batch_size
+        )
     else:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-
-    model_cfg = get_model_config(args.model_desc)
-    model = model_cfg.get_model_and_optimizer(device)[0]
-    evaluate(model, device, args.batch_size)
+        run_eval_from_model_desc(args.model_desc, args.device, args.batch_size)

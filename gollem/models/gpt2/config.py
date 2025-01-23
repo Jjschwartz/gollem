@@ -61,9 +61,12 @@ class GPT2Config(ModelConfig):
         return get_tokenizer("gpt2")
 
     def get_model_and_optimizer(
-        self, device: str
+        self, device: str | torch.device
     ) -> Tuple[BaseLLM, torch.optim.Optimizer]:
-        device_type = "cuda" if "cuda" in device else "cpu"
+        if isinstance(device, str):
+            device_type = "cuda" if "cuda" in device else "cpu"
+        else:
+            device_type = device.type
         model = GPT.from_pretrained(self) if self.from_pretrained else GPT(self)
         model.to(device)
         optimizer = model.configure_optimizers(device_type=device_type)
