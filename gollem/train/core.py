@@ -23,7 +23,11 @@ def run(
     output_dir = (
         None if train_config.output_dir == "" else Path(train_config.output_dir)
     )
-    logger = RunLogger(output_dir=output_dir, use_wandb=train_config.use_wandb)
+    logger = RunLogger(
+        run_name=f"{model_config.model_name}_{dataset_config.name}",
+        output_dir=output_dir,
+        use_wandb=train_config.use_wandb,
+    )
 
     if train_config.device and train_config.device != "auto":
         device = train_config.device

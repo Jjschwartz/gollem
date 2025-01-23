@@ -6,7 +6,9 @@ from warnings import warn
 class RunLogger:
     """Logger that handles logging to wandb, stdout and local file."""
 
-    def __init__(self, output_dir: Path | None = None, use_wandb: bool = False):
+    def __init__(
+        self, run_name: str, output_dir: Path | None = None, use_wandb: bool = False
+    ):
         """Initialize the logger.
 
         Args:
@@ -29,7 +31,10 @@ class RunLogger:
                 import wandb
 
                 self.wandb = wandb
-                self.wandb.init(project="gollem")
+                self.wandb.init(
+                    project="gollem",
+                    name=run_name,
+                )
             except ImportError:
                 print("wandb not installed, disabling wandb logging")
                 self.use_wandb = False
