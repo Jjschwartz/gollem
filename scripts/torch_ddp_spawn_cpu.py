@@ -23,12 +23,9 @@ class MyTrainDataset(Dataset):
         return self.data[index]
 
 
-def ddp_setup(rank: int, world_size: int) -> None:
-    """
-    Args:
-        rank: Unique identifier of each process
-        world_size: Total number of processes
-    """
+def main(
+    rank: int, world_size: int, save_every: int, total_epochs: int, batch_size: int
+):
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = "12355"
 
@@ -36,12 +33,6 @@ def ddp_setup(rank: int, world_size: int) -> None:
     torch.set_num_threads(1)
     torch.set_num_interop_threads(1)
     init_process_group(backend="gloo", rank=rank, world_size=world_size)
-
-
-def main(
-    rank: int, world_size: int, save_every: int, total_epochs: int, batch_size: int
-):
-    ddp_setup(rank, world_size)
 
     train_dataset = MyTrainDataset(2048)
     train_data = DataLoader(

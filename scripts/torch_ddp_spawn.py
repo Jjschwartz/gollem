@@ -68,9 +68,9 @@ def main(
 
         if rank == 0 and epoch % save_every == 0:
             # use model.module to save the state_dict, since model is wrapped in DDP
-            ckp = model.module.state_dict()
             PATH = "checkpoint.pt"
-            torch.save(ckp, PATH)
+            # ckp = model.module.state_dict()
+            # torch.save(ckp, PATH)
             print(f"Epoch {epoch} | Training checkpoint saved at {PATH}")
 
     destroy_process_group()
