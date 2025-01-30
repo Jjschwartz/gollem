@@ -1,7 +1,7 @@
 import os
+from pathlib import Path
 
 import torch
-import torch.multiprocessing as mp
 import torch.nn.functional as F
 from torch.distributed import destroy_process_group
 from torch.distributed import init_process_group
@@ -9,6 +9,10 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
 from torch.utils.data.distributed import DistributedSampler
+
+
+snapshot_path = Path(__file__).parent.parent / "results" / "torch_ddp_snapshot.pt"
+snapshot_path.parent.mkdir(parents=True, exist_ok=True)
 
 
 class MyTrainDataset(Dataset):
@@ -24,14 +28,17 @@ class MyTrainDataset(Dataset):
 
 
 def main(
-    rank: int, world_size: int, save_every: int, total_epochs: int, batch_size: int
+    save_every: int,
+    total_epochs: int,
+    batch_size: int,
 ):
+    world_size = int(os.environ["WORLD_SIZE"])
+    local_rank = int(os.environ["LOCAL_RANK"])
+    rank = int(os.environ["RANK"])
+    print(f"Launching GPU{rank}|{local_rank} in process group {world_size}")
+
     print(f"[GPU{rank}] Initializing process group")
-    # init process group
-    os.environ["MASTER_ADDR"] = "localhost"
-    os.environ["MASTER_PORT"] = "12355"
-    torch.cuda.set_device(rank)
-    init_process_group(backend="nccl", rank=rank, world_size=world_size)
+    init_process_group(backend="nccl")
     print(f"[GPU{rank}] Process group initialized")
 
     # load dataset
@@ -50,24 +57,32 @@ def main(
     # load model
     print(f"[GPU{rank}] Loading model")
     model = torch.nn.Linear(20, 1)
-    model = model.cuda(rank)
+    model = model.cuda(local_rank)
     optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
     print(f"[GPU{rank}] Model loaded")
+
+    # load snapshot if it exists
+    epochs_run = 0
+    if snapshot_path.exists():
+        print(f"[GPU{rank}] Loading snapshot from {snapshot_path}")
+        snapshot = torch.load(snapshot_path)
+        epochs_run = snapshot["EPOCHS_RUN"]
+        model.load_state_dict(snapshot["MODEL_STATE"])
+        optimizer.load_state_dict(snapshot["OPTIMIZER_STATE"])
+        print(f"[GPU{rank}] Snapshot loaded. Epochs run: {epochs_run}")
 
     # setup DDP
     print(f"[GPU{rank}] DDP setup")
     model = DDP(model, device_ids=[rank])
     print(f"[GPU{rank}] DDP setup complete")
 
-    for epoch in range(total_epochs):
+    for epoch in range(epochs_run, total_epochs):
         batch_size = len(next(iter(train_data))[0])
-        print(
-            f"[GPU{rank}] Epoch {epoch} | Batchsize: {batch_size} | Steps: {len(train_data)}"
-        )
         train_data.sampler.set_epoch(epoch)  # type: ignore
+        loss = torch.tensor(0.0, device=local_rank)
         for source, targets in train_data:
-            source = source.to(rank)
-            targets = targets.to(rank)
+            source = source.to(local_rank)
+            targets = targets.to(local_rank)
 
             optimizer.zero_grad()
             output = model(source)
@@ -75,12 +90,19 @@ def main(
             loss.backward()
             optimizer.step()
 
+        print(
+            f"[GPU{rank}|{local_rank}] Epoch {epoch} | Batchsize: {batch_size} | Steps: {len(train_data)} | Loss: {loss.item()}"
+        )
+
         if rank == 0 and epoch % save_every == 0:
             # use model.module to save the state_dict, since model is wrapped in DDP
-            ckp = model.module.state_dict()
-            PATH = "checkpoint.pt"
-            torch.save(ckp, PATH)
-            print(f"Epoch {epoch} | Training checkpoint saved at {PATH}")
+            snapshot = {
+                "EPOCHS_RUN": epoch,
+                "MODEL_STATE": model.module.state_dict(),
+                "OPTIMIZER_STATE": optimizer.state_dict(),
+            }
+            torch.save(snapshot, snapshot_path)
+            print(f"Epoch {epoch} | Training snapshot saved at {snapshot_path}")
 
     destroy_process_group()
 
@@ -100,12 +122,4 @@ if __name__ == "__main__":
         help="Input batch size on each device (default: 32)",
     )
     args = parser.parse_args()
-
-    world_size = torch.cuda.device_count()
-    # world_size = 2
-    print(f"Using {world_size} GPUs")
-    mp.spawn(
-        main,
-        args=(world_size, args.save_every, args.total_epochs, args.batch_size),
-        nprocs=world_size,
-    )
+    main(args.save_every, args.total_epochs, args.batch_size)

@@ -43,7 +43,7 @@ def main(
 ):
     ddp_setup(rank, world_size)
 
-    train_dataset = MyTrainDataset(2048)
+    train_dataset = MyTrainDataset(max(2048, world_size * batch_size))
     train_data = DataLoader(
         train_dataset,
         batch_size=batch_size,
@@ -59,10 +59,11 @@ def main(
     model = DDP(model)
 
     for epoch in range(total_epochs):
+        # batch size for this process
         batch_size = len(next(iter(train_data))[0])
-        print(
-            f"[CPU{rank}] Epoch {epoch} | Batchsize: {batch_size} | Steps: {len(train_data)}"
-        )
+        # number of steps within an epoch
+        steps = len(train_data)
+        print(f"[CPU{rank}] Epoch {epoch} | Batchsize: {batch_size} | Steps: {steps}")
         train_data.sampler.set_epoch(epoch)  # type: ignore
         for source, targets in train_data:
             optimizer.zero_grad()
@@ -98,7 +99,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     n_cpus = os.cpu_count() or 4
-    world_size = n_cpus // 2
+    world_size = n_cpus
+    print(f"Using {world_size} CPUs")
     mp.spawn(
         main,
         args=(world_size, args.save_every, args.total_epochs, args.batch_size),
