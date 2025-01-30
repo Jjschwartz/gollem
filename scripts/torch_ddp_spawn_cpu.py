@@ -23,12 +23,9 @@ class MyTrainDataset(Dataset):
         return self.data[index]
 
 
-def ddp_setup(rank: int, world_size: int) -> None:
-    """
-    Args:
-        rank: Unique identifier of each process
-        world_size: Total number of processes
-    """
+def main(
+    rank: int, world_size: int, save_every: int, total_epochs: int, batch_size: int
+):
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = "12355"
 
