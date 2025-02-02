@@ -50,6 +50,8 @@ class GPT2Config(ModelConfig):
     betas: Tuple[float, float] = (0.9, 0.95)
     # Use fused version of AdamW optimizer.
     fused_adamw: bool = True
+    # Use ZeroRedundancyOptimizer.
+    zero_optimizer: bool = True
     # Use flash attention.
     flash: bool = True
     # Torch.compile the model.

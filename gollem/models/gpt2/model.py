@@ -9,13 +9,16 @@ model so we can easily load pretained weights
 
 import inspect
 import math
+import os
 from typing import TYPE_CHECKING
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.distributed.optim import ZeroRedundancyOptimizer
 
 from gollem.models.model import BaseLLM
+from gollem.utils import print0
 
 
 if TYPE_CHECKING:
@@ -236,11 +239,11 @@ class GPT(BaseLLM["GPT2Config"]):
         ]
         num_decay_params = sum(p.numel() for p in decay_params)
         num_nodecay_params = sum(p.numel() for p in nodecay_params)
-        print(
+        print0(
             f"num decayed parameter tensors: "
             f"{len(decay_params)}, with {num_decay_params:,} parameters"
         )
-        print(
+        print0(
             f"num non-decayed parameter tensors: "
             f"{len(nodecay_params)}, with {num_nodecay_params:,} parameters"
         )
@@ -251,13 +254,25 @@ class GPT(BaseLLM["GPT2Config"]):
             fused_available = "fused" in inspect.signature(torch.optim.AdamW).parameters
             use_fused = fused_available and device_type == "cuda"
 
-        print(f"Using regular AdamW with fused={use_fused}")
-        optimizer = torch.optim.AdamW(
-            optim_groups,
-            lr=self.cfg.learning_rate,
-            betas=self.cfg.betas,
-            fused=use_fused,
-        )
+        ddp = int(os.environ.get("RANK", -1)) != -1  # is this a ddp run?
+        if self.cfg.zero_optimizer and ddp:
+            print0(f"Using ZeroRedundancyOptimizer with fused={use_fused}")
+            optimizer = ZeroRedundancyOptimizer(
+                **optim_groups[0],
+                optimizer_class=torch.optim.AdamW,
+                lr=self.cfg.learning_rate,
+                betas=self.cfg.betas,
+                fused=use_fused,
+            )
+            optimizer.add_param_group(optim_groups[1])
+        else:
+            print0(f"Using regular AdamW with fused={use_fused}")
+            optimizer = torch.optim.AdamW(
+                optim_groups,
+                lr=self.cfg.learning_rate,
+                betas=self.cfg.betas,
+                fused=use_fused,
+            )
         return optimizer
 
     @classmethod
