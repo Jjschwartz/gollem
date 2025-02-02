@@ -21,7 +21,7 @@
 # - num_iterations = 925653391 / 524288 = 1766
 # - changed warmup_iters to 70 (i.e. 10% of 700, since dataset is 10% of 10B)
 echo "Running GPT2 124M model"
-uv run python gollem/train_gpt2.py \
+uv run torchrun --standalone --nproc_per_node=4 gollem/train_gpt2.py \
     --dataset tinystories \
     --model.model_name gpt2_124M \
     --model.n_ctx 1024 \
@@ -40,6 +40,7 @@ uv run python gollem/train_gpt2.py \
     --model.fused_adamw True \
     --model.flash True \
     --model.compile True \
+    --model.zero_optimizer True \
     --model.from_pretrained False \
     --train.output_dir results/gpt2_tinystories \
     --train.seed 42 \
