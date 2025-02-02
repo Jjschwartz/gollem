@@ -1,4 +1,5 @@
 import glob
+from typing import Iterator
 
 import numpy as np
 import torch
@@ -36,9 +37,18 @@ class DataLoader:
     Handles having the data spread across multiple files, aka "shards".
     """
 
-    def __init__(self, filename_pattern: str, B: int, T: int):
-        self.B = B
-        self.T = T
+    def __init__(
+        self,
+        filename_pattern: str,
+        batch_size: int,
+        seq_len: int,
+        world_size: int,
+        rank: int,
+    ):
+        self.batch_size = batch_size
+        self.seq_len = seq_len
+        self.world_size = world_size
+        self.rank = rank
 
         # glob files that match the pattern
         self.files = sorted(glob.glob(filename_pattern))
@@ -50,7 +60,7 @@ class DataLoader:
         ntok_total = 0
         for fname in self.files:
             shard_ntok = _peek_data_shard(fname)
-            assert shard_ntok >= B * T + 1
+            assert shard_ntok >= self.world_size * self.batch_size * self.seq_len + 1
             ntok_total += shard_ntok
         self.ntok_total = ntok_total
         print(
@@ -68,23 +78,29 @@ class DataLoader:
         if self.current_shard != 0:
             self.current_shard = 0
             self.tokens = _load_data_shard(self.files[self.current_shard])
-        self.current_position = self.B * self.T
+        self.current_position = self.rank * self.batch_size * self.seq_len
 
     def advance(self):
         """Advance to next data shard."""
         self.current_shard = (self.current_shard + 1) % len(self.files)
-        self.current_position = self.B * self.T
+        self.current_position = self.rank * self.batch_size * self.seq_len
         self.tokens = _load_data_shard(self.files[self.current_shard])
 
-    def next_batch(self):
-        B, T = self.B, self.T
+    def next_batch(self) -> tuple[torch.Tensor, torch.Tensor]:
+        B, T = self.batch_size, self.seq_len
         buf = self.tokens[self.current_position : self.current_position + B * T + 1]
         buf = torch.tensor(buf.astype(np.int32), dtype=torch.long)
         x = (buf[:-1]).view(B, T)  # inputs
         y = (buf[1:]).view(B, T)  # targets
         # advance the start pointer in current shard
-        self.current_position += B * T
+        self.current_position += self.world_size * B * T
         # if loading the next batch would be out of bounds advance the shard
         if self.current_position + (B * T + 1) > len(self.tokens):
             self.advance()
         return x, y
+
+    def __next__(self) -> tuple[torch.Tensor, torch.Tensor]:
+        return self.next_batch()
+
+    def __iter__(self) -> Iterator[tuple[torch.Tensor, torch.Tensor]]:
+        return self
