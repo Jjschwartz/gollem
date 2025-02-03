@@ -9,8 +9,6 @@ import numpy as np
 import torch
 import torch.distributed as dist
 import torch.version
-from torch.distributed import destroy_process_group
-from torch.distributed import init_process_group
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 from gollem.data.config import DataConfig
@@ -32,12 +30,17 @@ def run(
     model_config: ModelConfig,
     train_config: TrainConfig,
 ) -> dict[str, Any]:
+    """The main run function.
+
+    If using DDP assumes `init_process_group` has already been called by the calling
+    function, and similarly `destroy_process_group` should be called by the calling
+    function.
+    """
     # set up DDP (distributed data parallel). torchrun sets this env variable
     ddp = int(os.environ.get("RANK", -1)) != -1  # is this a ddp run?
     if ddp:
         # use of DDP atm demands CUDA, we set the device appropriately according to rank
         assert torch.cuda.is_available(), "We need CUDA for DDP"
-        init_process_group(backend="nccl")
         ddp_rank = int(os.environ["RANK"])
         ddp_local_rank = int(os.environ["LOCAL_RANK"])
         ddp_world_size = int(os.environ["WORLD_SIZE"])
@@ -174,6 +177,7 @@ def run(
             train_config.val_loss_every > 0
             and (step % train_config.val_loss_every == 0 or final_step)
         ) and (val_loader is not None):
+            val_t0 = time.time()
             model.eval()
             val_loader.reset()
             with torch.no_grad():
@@ -185,8 +189,10 @@ def run(
                     val_loss += loss.item()
                 val_loss /= train_config.val_max_steps
             # log to console and to file
-            logger.log_metrics({"val_loss": val_loss}, step=step)
-
+            val_t1 = time.time()
+            logger.log_metrics(
+                {"val_loss": val_loss, "val_time": (val_t1 - val_t0) * 1000}, step=step
+            )
         # once in a while perform model inference on the master process
         if (
             train_config.sample_every > 0
@@ -330,11 +336,6 @@ def run(
             f"saving final model to {output_dir}/model_s{train_config.num_iterations}.pt"
         )
         raw_model.save_model(f"{output_dir}/model_s{train_config.num_iterations}.pt")
-
-    # TODO not sure if this should be here or outside of this function
-    # clean up nice
-    if ddp:
-        destroy_process_group()
 
     if not is_master_process:
         return {}

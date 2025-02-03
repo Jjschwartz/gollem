@@ -60,7 +60,10 @@ class DataLoader:
         ntok_total = 0
         for fname in self.files:
             shard_ntok = _peek_data_shard(fname)
-            assert shard_ntok >= self.world_size * self.batch_size * self.seq_len + 1
+            assert shard_ntok >= self.world_size * self.batch_size * self.seq_len + 1, (
+                f"shard {fname} has only {shard_ntok} tokens, but requires >= "
+                f"{self.world_size * self.batch_size * self.seq_len + 1} tokens"
+            )
             ntok_total += shard_ntok
         self.ntok_total = ntok_total
         print(

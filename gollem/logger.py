@@ -22,7 +22,7 @@ class RunLogger:
         self.run_name = run_name
         self.is_master_process = is_master_process
         self.output_dir = output_dir
-        if output_dir is not None:
+        if output_dir is not None and self.is_master_process:
             output_dir.mkdir(parents=True, exist_ok=True)
             self.logfile = output_dir / "main.log"
             if self.logfile.exists():
@@ -32,7 +32,7 @@ class RunLogger:
             self.logfile = None
 
         self.use_wandb = use_wandb
-        if use_wandb:
+        if use_wandb and self.is_master_process:
             try:
                 import wandb
 
