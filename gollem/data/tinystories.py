@@ -1,7 +1,6 @@
 """
 Downloads and tokenizes the TinyStories dataset.
 - The download is from HuggingFace datasets.
-- The tokenization is using either GPT-2 or LLaMA 3 tokenizer.
 
 The output is written to a newly created tinystories/ folder.
 The script prints:
