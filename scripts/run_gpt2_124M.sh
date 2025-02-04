@@ -19,10 +19,9 @@
 # Notes for tinystories:
 # - 925,653,391 tokens
 # - num_iterations = 925653391 / 524288 = 1766
-# - changed warmup_iters to 70 (i.e. 10% of 700, since dataset is 10% of 10B)
 echo "Running GPT2 124M model"
 uv run torchrun --standalone --nproc_per_node=4 gollem/train_gpt2.py \
-    --dataset tinystories \
+    --dataset fineweb_edu_10B \
     --model.model_name gpt2_124M \
     --model.n_ctx 1024 \
     --model.n_layer 12 \
@@ -42,12 +41,12 @@ uv run torchrun --standalone --nproc_per_node=4 gollem/train_gpt2.py \
     --model.compile True \
     --model.zero_optimizer True \
     --model.from_pretrained False \
-    --train.output_dir results/gpt2_tinystories \
+    --train.output_dir results/gpt2_fineweb_edu_10B \
     --train.seed 42 \
     --train.batch_size 16 \
     --train.seq_len 1024 \
     --train.total_batch_size 524288 \
-    --train.num_iterations 1766 \
+    --train.num_iterations 18865 \
     --train.val_loss_every 250 \
     --train.val_max_steps 20 \
     --train.sample_every 0 \
