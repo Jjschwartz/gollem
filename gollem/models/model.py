@@ -91,5 +91,9 @@ def load_model(path: str, device: str | torch.device) -> BaseLLM:
     # Note we need to do it this way since the model may have been compiled
     # which results in a different state dict structure to the original model
     model = data["config"].get_model_and_optimizer(device)[0]
-    model.load_state_dict(data["model_state_dict"])
+    raw_model = model
+    if hasattr(model, "_orig_mod"):
+        # model was compiled so we need
+        raw_model = model._orig_mod
+    raw_model.load_state_dict(data["model_state_dict"])
     return model

@@ -185,7 +185,7 @@ def load_data(
     tokenizer: BaseTokenizer,
     version: Literal["classic", "edu"],
     size: Literal["10B", "100B"],
-    shard_size: int,
+    shard_size: int = 100_000_000,
 ) -> DataConfig:
     dataset_map, dataset_name, local_dir_name = download(version, size)
     val_filenames, train_filenames = tokenize(
@@ -230,7 +230,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--shard_size",
         type=int,
-        default=10**8,
+        default=100_000_000,
         help="Size of each data shard in the output .bin files, in tokens",
     )
     args = parser.parse_args()
