@@ -16,6 +16,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed.optim import ZeroRedundancyOptimizer
+from torch.utils.checkpoint import checkpoint
 
 from gollem.models.model import BaseLLM
 from gollem.utils import print0
@@ -199,7 +200,10 @@ class GPT(BaseLLM["GPT2Config"]):
 
         # forward thru blocks: x = (B, T, d_model)
         for block in self.transformer.h:
-            x = block(x)
+            if self.cfg.activation_checkpointing:
+                x = checkpoint(block, x, use_reentrant=False)
+            else:
+                x = block(x)
         x = self.transformer.ln_f(x)
 
         if targets is not None:

@@ -54,6 +54,8 @@ class GPT2Config(ModelConfig):
     zero_optimizer: bool = True
     # Use flash attention.
     flash: bool = True
+    # Use activation checkpointing
+    activation_checkpointing = False
     # Torch.compile the model.
     compile: bool = True
     # Load from pretrained weights
@@ -121,6 +123,10 @@ GPT2_MEDIUM_CONFIG = GPT2Config(
     n_head=16,
     d_model=1024,
     d_mlp=4 * 1024,
+    learning_rate=0.0006,
+    warmup_iters=700,
+    learning_rate_decay_frac=0.0,
+    weight_decay=0.1,
 )
 
 # 774M params
@@ -130,6 +136,10 @@ GPT2_LARGE_CONFIG = GPT2Config(
     n_head=20,
     d_model=1280,
     d_mlp=4 * 1280,
+    learning_rate=0.0006,
+    warmup_iters=700,
+    learning_rate_decay_frac=0.0,
+    weight_decay=0.1,
 )
 
 # 1558M params
@@ -139,4 +149,15 @@ GPT2_XL_CONFIG = GPT2Config(
     n_head=25,
     d_model=1600,
     d_mlp=4 * 1600,
+    learning_rate=0.0006,
+    warmup_iters=700,
+    learning_rate_decay_frac=0.0,
+    weight_decay=0.1,
 )
+
+
+def get_gpt2_model_config(name: str) -> GPT2Config:
+    for cfg in [GPT2_CONFIG, GPT2_MEDIUM_CONFIG, GPT2_LARGE_CONFIG, GPT2_XL_CONFIG]:
+        if cfg.model_name == name:
+            return cfg
+    raise ValueError(f"No config found for name='{name}'")

@@ -1,6 +1,7 @@
 """Measure GPT-2 model efficiency with different batch sizes."""
 
 import csv
+import json
 import time
 from dataclasses import asdict
 from datetime import datetime
@@ -10,50 +11,50 @@ from pprint import pprint
 import torch
 from gollem.data import load_dataset
 from gollem.models.gpt2.config import GPT2Config
+from gollem.models.gpt2.config import get_gpt2_model_config
 from gollem.train.config import TrainConfig
 from gollem.train.core import run
 
 
+THIS_DIR = Path(__file__).parent
+
 BASE_TRAIN_CONFIG = TrainConfig(
     output_dir="",
-    batch_size=4,
-    seq_len=512,
-    total_batch_size=524288,
+    batch_size=4,  # will be overriden
+    seq_len=1024,
+    total_batch_size=524288,  # will be overriden
     num_iterations=100,
-    device="",
+    device="cuda",  # assuming cuda since we use bfloat16
     use_wandb=False,
     tensorcores=True,
-    dtype="float16",
+    dtype="bfloat16",
 )
 
-MODEL_CONFIG = GPT2Config(
-    model_name="gpt2",
-    n_layer=12,
-    n_head=12,
-    d_model=768,
-    d_mlp=4 * 768,
-    learning_rate=0.0006,
-    warmup_iters=700,
-    learning_rate_decay_frac=0.0,
-    weight_decay=0.1,
-    flash=True,
-    compile=True,
-    fused_adamw=True,
-)
 
-DATASET_CONFIG = load_dataset(
-    "tinystories",
-    encoder=MODEL_CONFIG.get_tokenizer(),
-)
-
-THIS_DIR = Path(__file__).parent
-RESULTS_DIR = THIS_DIR.parent / "results" / "gpt2_batch_size_benchmarking"
-
-
-def run_benchmark(debug: bool = False):
+def run_benchmark(
+    model_config: GPT2Config,
+    use_activation_checkpointing: bool = False,
+    debug: bool = False,
+):
+    results_dir = (
+        THIS_DIR.parent
+        / "results"
+        / f"{model_config.model_name}_batch_size_benchmarking"
+    )
+    results_dir.mkdir(parents=True, exist_ok=True)
     time_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    results_file_path = RESULTS_DIR / f"results_{time_str}.csv"
-    results_file_path.parent.mkdir(parents=True, exist_ok=True)
+    if use_activation_checkpointing:
+        results_file_path = results_dir / f"results_{time_str}_ac.csv"
+    else:
+        results_file_path = results_dir / f"results_{time_str}.csv"
+
+    if use_activation_checkpointing:
+        model_config.activation_checkpointing = use_activation_checkpointing
+
+    # save model config
+    if not debug:
+        with open(results_file_path.with_suffix(".json"), "w") as f:
+            json.dump(asdict(model_config), f)
 
     # get max mem available
     if torch.cuda.is_available():
@@ -61,10 +62,14 @@ def run_benchmark(debug: bool = False):
     else:
         max_mem = 0
 
-    # 512
+    dataset_config = load_dataset(
+        "tinystories",
+        encoder=model_config.get_tokenizer(),
+    )
+
     seq_len = BASE_TRAIN_CONFIG.seq_len
     # batch size = 2^batch_size_power * seq_len
-    batch_size_power_range = [0, 10]
+    batch_size_power_range = [0, 12]
     total_num_runs = batch_size_power_range[1] - batch_size_power_range[0]
     print(f"Total number of runs: {total_num_runs}")
 
@@ -81,11 +86,13 @@ def run_benchmark(debug: bool = False):
                 "total_batch_size": total_batch_size,
             }
         )
-        base_train_kwargs.pop("grad_accum_steps")
         train_config = TrainConfig(**base_train_kwargs)
-        assert train_config.grad_accum_steps == 1
+        tokens_per_fwdbwd = batch_size_num_seqs * seq_len
+        assert train_config.total_batch_size % tokens_per_fwdbwd == 0
+        grad_accum_steps = train_config.total_batch_size // tokens_per_fwdbwd
+        assert grad_accum_steps == 1
 
-        run_name = f"batch_size={batch_size_tokens}"
+        run_name = f"batch_size={batch_size_tokens} ({batch_size_num_seqs}x{seq_len})"
 
         print("=" * 100)
         print(f"Run {i + 1}/{total_num_runs}: {run_name}")
@@ -94,7 +101,11 @@ def run_benchmark(debug: bool = False):
             continue
 
         start_time = time.time()
-        run_results = run(DATASET_CONFIG, MODEL_CONFIG, train_config)
+        run_results = run(
+            dataset_config=dataset_config,
+            model_config=model_config,
+            train_config=train_config,
+        )
         end_time = time.time()
         time_taken = end_time - start_time
 
@@ -128,6 +139,14 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "model_name",
+        type=str,
+        choices=["gpt2", "gpt2-medium", "gpt2-large", "gpt2-xl"],
+    )
+    parser.add_argument("-a", "--use_activation_checkpointing", action="store_true")
     parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
-    run_benchmark(args.debug)
+
+    model_config = get_gpt2_model_config(args.model_name)
+    run_benchmark(model_config, args.use_activation_checkpointing, args.debug)
