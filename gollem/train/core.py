@@ -168,6 +168,7 @@ def run(
         torch.cuda.reset_peak_memory_stats()
 
     # main training loop
+    logger.log(f"Starting training for {train_config.num_iterations} iterations")
     timings = []
     for step in range(train_config.num_iterations + 1):
         final_step = step == train_config.num_iterations

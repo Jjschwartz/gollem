@@ -66,6 +66,8 @@ def run_benchmark(
         "tinystories",
         encoder=model_config.get_tokenizer(),
     )
+    # disable loading validation set since we don't need it
+    dataset_config.val_data_pattern = None
 
     seq_len = BASE_TRAIN_CONFIG.seq_len
     # batch size = 2^batch_size_power * seq_len
@@ -113,7 +115,12 @@ def run_benchmark(
         pprint(run_results)
 
         if not result_headers:
-            result_headers = ["run_name", "total_time"] + list(run_results.keys())
+            result_headers = [
+                "run_name",
+                "mini_batch_size",
+                "total_batch_size",
+                "total_time",
+            ] + list(run_results.keys())
             with open(results_file_path, "w") as output_file:
                 results_writer = csv.DictWriter(output_file, fieldnames=result_headers)
                 results_writer.writeheader()
@@ -123,6 +130,8 @@ def run_benchmark(
             results_writer.writerow(
                 {
                     "run_name": run_name,
+                    "mini_batch_size": batch_size_tokens,
+                    "total_batch_size": total_batch_size,
                     "total_time": time_taken,
                     **run_results,
                 }
@@ -149,4 +158,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     model_config = get_gpt2_model_config(args.model_name)
-    run_benchmark(model_config, args.use_activation_checkpointing, args.debug)
+    run_benchmark(
+        model_config,
+        args.use_activation_checkpointing,
+        args.debug,
+    )
