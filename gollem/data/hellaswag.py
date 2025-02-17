@@ -36,6 +36,7 @@ import torch
 from gollem.data.common import DATA_CACHE_DIR
 from gollem.data.common import download_file
 from gollem.tokenizer import BaseTokenizer
+from gollem.utils import print0
 
 
 # -----------------------------------------------------------------------------
@@ -57,7 +58,7 @@ def download(split: str) -> None:
         print(f"Downloading {data_url} to {data_filename}...")
         download_file(data_url, data_filename)
     else:
-        print(f"{data_filename} already exists, skipping download...")
+        print0(f"{data_filename} already exists, skipping download...")
 
 
 def render_example(

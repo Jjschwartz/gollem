@@ -12,6 +12,7 @@ from gollem.models.gpt2.model import GPT
 from gollem.models.model import BaseLLM
 from gollem.tokenizer import BaseTokenizer
 from gollem.tokenizer import get_tokenizer
+from gollem.utils import print0
 
 
 @dataclass
@@ -76,7 +77,7 @@ class GPT2Config(ModelConfig):
         optimizer = model.configure_optimizers(device_type=device_type)
 
         if self.compile:
-            print("compiling the model...")
+            print0("compiling the model...")
             model = torch.compile(model)  # type: ignore
 
         return model, optimizer  # type: ignore

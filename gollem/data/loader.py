@@ -1,8 +1,11 @@
 import glob
+from typing import Any
 from typing import Iterator
 
 import numpy as np
 import torch
+
+from gollem.utils import print0
 
 
 def _peek_data_shard(filename: str) -> int:
@@ -11,7 +14,7 @@ def _peek_data_shard(filename: str) -> int:
         # first read the header, which is 256 int32 integers (4 bytes each)
         header = np.frombuffer(f.read(256 * 4), dtype=np.int32)
     if header[0] != 20240520:
-        print("ERROR: magic number mismatch in the data .bin file!")
+        print0("ERROR: magic number mismatch in the data .bin file!")
         exit(1)
     assert header[1] == 1, "unsupported version"
     ntok = header[2]  # number of tokens (claimed)
@@ -52,9 +55,9 @@ class DataLoader:
 
         # glob files that match the pattern
         self.files = sorted(glob.glob(filename_pattern))
-        assert len(self.files) > 0, (
-            f"did not find any files that match the pattern {filename_pattern}"
-        )
+        assert (
+            len(self.files) > 0
+        ), f"did not find any files that match the pattern {filename_pattern}"
 
         # load and validate all data shards, count number of tokens in total
         ntok_total = 0
@@ -66,13 +69,14 @@ class DataLoader:
             )
             ntok_total += shard_ntok
         self.ntok_total = ntok_total
-        print(
+        print0(
             f"DataLoader: total number of tokens: {ntok_total:,} "
             f"across {len(self.files)} files"
         )
 
         # kick things off
         self.current_shard = -1
+        self.current_position_idx = 0
         self.reset()
 
     def reset(self):
@@ -81,24 +85,27 @@ class DataLoader:
         if self.current_shard != 0:
             self.current_shard = 0
             self.tokens = _load_data_shard(self.files[self.current_shard])
-        self.current_position = self.rank * self.batch_size * self.seq_len
+        self.current_position_idx = 0
 
     def advance(self):
         """Advance to next data shard."""
         self.current_shard = (self.current_shard + 1) % len(self.files)
-        self.current_position = self.rank * self.batch_size * self.seq_len
+        self.current_position_idx = 0
         self.tokens = _load_data_shard(self.files[self.current_shard])
 
     def next_batch(self) -> tuple[torch.Tensor, torch.Tensor]:
         B, T = self.batch_size, self.seq_len
-        buf = self.tokens[self.current_position : self.current_position + B * T + 1]
+        W, R = self.world_size, self.rank
+        current_position = (self.current_position_idx * W + R) * B * T
+        buf = self.tokens[current_position : current_position + B * T + 1]
         buf = torch.tensor(buf.astype(np.int32), dtype=torch.long)
         x = (buf[:-1]).view(B, T)  # inputs
         y = (buf[1:]).view(B, T)  # targets
         # advance the start pointer in current shard
-        self.current_position += self.world_size * B * T
+        self.current_position_idx += 1
+        next_position = (self.current_position_idx * W + R) * B * T
         # if loading the next batch would be out of bounds advance the shard
-        if self.current_position + (B * T + 1) > len(self.tokens):
+        if next_position + (B * T + 1) > len(self.tokens):
             self.advance()
         return x, y
 
@@ -107,3 +114,15 @@ class DataLoader:
 
     def __iter__(self) -> Iterator[tuple[torch.Tensor, torch.Tensor]]:
         return self
+
+    def state_dict(self) -> dict[str, Any]:
+        assert self.current_shard != -1, "DataLoader not initialized"
+        return {
+            "current_shard": self.current_shard,
+            "current_position_idx": self.current_position_idx,
+        }
+
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        self.current_shard = state_dict["current_shard"]
+        self.current_position_idx = state_dict["current_position_idx"]
+        self.tokens = _load_data_shard(self.files[self.current_shard])

@@ -42,6 +42,7 @@ from gollem.data.common import write_datafile
 from gollem.data.config import DataConfig
 from gollem.tokenizer import BaseTokenizer
 from gollem.tokenizer import get_tokenizer
+from gollem.utils import print0
 
 
 # -----------------------------------------------------------------------------
@@ -56,24 +57,24 @@ def download():
     data_url = "https://huggingface.co/datasets/roneneldan/TinyStories/resolve/main/TinyStories_all_data.tar.gz"
     data_filename = THIS_DATA_CACHE_DIR / "TinyStories_all_data.tar.gz"
     if not os.path.exists(data_filename):
-        print(f"Downloading {data_url} to {data_filename}...")
+        print0(f"Downloading {data_url} to {data_filename}...")
         download_file(data_url, data_filename)
     else:
-        print(f"{data_filename} already exists, skipping download...")
+        print0(f"{data_filename} already exists, skipping download...")
 
     # unpack the tar.gz file into all the data shards (json files)
     data_dir = THIS_DATA_CACHE_DIR / "TinyStories_all_data"
     if not data_dir.exists():
         data_dir.mkdir(parents=True, exist_ok=True)
-        print(f"Unpacking {data_filename}...")
+        print0(f"Unpacking {data_filename}...")
         os.system(f"tar -xzf {data_filename} -C {data_dir}")
     else:
-        print(f"{data_dir} already exists, skipping unpacking...")
+        print0(f"{data_dir} already exists, skipping unpacking...")
 
     # print a single example just for debugging and such
     shard_filenames = sorted(glob.glob(str(data_dir / "*.json")))
-    print("Download done.")
-    print(f"Number of shards: {len(shard_filenames)}")
+    print0("Download done.")
+    print0(f"Number of shards: {len(shard_filenames)}")
     # with open(shard_filenames[0], "r") as f:
     #     data = json.load(f)
     # print(f"Example story:\n{data[0]}")
@@ -102,7 +103,7 @@ def tokenize(tokenizer: BaseTokenizer) -> tuple[list[Path], list[Path]]:
     val_filename = encoder_data_dir / "TinyStories_val.bin"
     train_filename = encoder_data_dir / "TinyStories_train.bin"
     if val_filename.exists() and train_filename.exists():
-        print("Tokenized data already exists, skipping tokenization...")
+        print0("Tokenized data already exists, skipping tokenization...")
         return [val_filename], [train_filename]
 
     # shard 0 will be the val split, rest is train

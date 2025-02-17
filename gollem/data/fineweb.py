@@ -42,6 +42,7 @@ from gollem.data.common import write_datafile
 from gollem.data.config import DataConfig
 from gollem.tokenizer import BaseTokenizer
 from gollem.tokenizer import get_tokenizer
+from gollem.utils import print0
 
 
 # TODO test this:
@@ -64,7 +65,7 @@ def download(
     version: Literal["classic", "edu"], size: Literal["10B", "100B"]
 ) -> tuple[dict, str, str]:
     local_dir_name, remote_name = _DIRECTORIES[(version, size)]
-    print(f"Downloading fineweb {version} {size} (remote name: {remote_name})...")
+    print0(f"Downloading fineweb {version} {size} (remote name: {remote_name})...")
     # download the dataset
     if version == "classic":
         fw = load_dataset("HuggingFaceFW/fineweb", name=remote_name, split="train")
@@ -73,7 +74,7 @@ def download(
         fw = load_dataset("HuggingFaceFW/fineweb-edu", name=remote_name, split="train")
         name = "fineweb_edu"
 
-    print("Download complete")
+    print0("Download complete")
     return fw, name, local_dir_name
 
 
@@ -121,7 +122,7 @@ def tokenize(
     val_filename = encoder_data_dir / f"{dataset_name}_val_000000.bin"
     train_filenames = glob.glob(str(encoder_data_dir / f"{dataset_name}_train_*.bin"))
     if val_filename.exists() and train_filenames:
-        print("Tokenized data already exists, skipping tokenization...")
+        print0("Tokenized data already exists, skipping tokenization...")
         return [val_filename], [Path(f) for f in train_filenames]
 
     tokenize_fn = TokenizeFn(tokenizer)

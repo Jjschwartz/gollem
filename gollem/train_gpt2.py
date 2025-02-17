@@ -2,7 +2,6 @@ import os
 import sys
 from dataclasses import dataclass
 from dataclasses import field
-from pprint import pprint
 
 import pyrallis
 import torch
@@ -14,6 +13,7 @@ from gollem.data import load_dataset
 from gollem.models.gpt2.config import GPT2Config
 from gollem.train.config import TrainConfig
 from gollem.train.core import run
+from gollem.utils import print0
 
 
 @dataclass
@@ -28,9 +28,8 @@ class RunConfig:
 
 def main():
     try:
-        print("Parsing config")
+        print0("Parsing config")
         cfg = pyrallis.parse(config_class=RunConfig)
-        pprint(cfg)
     except Exception as e:
         print("Failed to parse config")
         print(e)

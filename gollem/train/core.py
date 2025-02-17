@@ -1,5 +1,6 @@
 import os
 import time
+import uuid
 from contextlib import nullcontext
 from dataclasses import asdict
 from pathlib import Path
@@ -9,20 +10,105 @@ import numpy as np
 import torch
 import torch.distributed as dist
 import torch.version
+from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 from gollem.data.config import DataConfig
 from gollem.data.loader import DataLoader
 from gollem.logger import RunLogger
 from gollem.models.config import ModelConfig
+from gollem.models.model import BaseLLM
 from gollem.train.config import TrainConfig
+from gollem.train.utils import get_snapshot_dir
 from gollem.utils import print0
 
 
-# TODO implement proper snapshotting for improved restarts
-# - implement saving of all necessary information (model, optimizer, lr scheduler, etc.
-# - implement loading from snapshot
-# - add loading and resuming from snapshot into run function
+def get_snapshot_path() -> Path:
+    snapshot_dir = get_snapshot_dir()
+    snapshot_path = snapshot_dir / "snapshot.pt"
+    return snapshot_path
+
+
+def save_snapshot(
+    run_id: str,
+    model: BaseLLM,
+    optimizer: torch.optim.Optimizer,
+    train_config: TrainConfig,
+    dataset_config: DataConfig,
+    train_loader: DataLoader,
+    val_loader: DataLoader | None,
+    step: int,
+) -> None:
+    snapshot_path = get_snapshot_path()
+    data = {
+        "run_id": run_id,
+        "model_state_dict": model.state_dict(),
+        "model_config": model.cfg,
+        "optimizer_state_dict": optimizer.state_dict(),
+        "train_config": train_config,
+        "dataset_config": dataset_config,
+        "train_loader": train_loader.state_dict(),
+        "val_loader": val_loader.state_dict() if val_loader is not None else None,
+        "step": step,
+    }
+    torch.save(data, snapshot_path)
+
+
+def load_snapshot(
+    snapshot_path: Path,
+    device: str | torch.device,
+    ddp_world_size: int,
+    ddp_rank: int,
+) -> tuple[
+    str,
+    BaseLLM,
+    torch.optim.Optimizer,
+    TrainConfig,
+    DataConfig,
+    DataLoader,
+    DataLoader | None,
+    int,
+]:
+    data = torch.load(snapshot_path, weights_only=False)
+    run_id = data["run_id"]
+    model_config = data["model_config"]
+    train_config = data["train_config"]
+    dataset_config = data["dataset_config"]
+
+    model, optimizer = model_config.get_model_and_optimizer(device=device)
+
+    model.load_state_dict(data["model_state_dict"])
+    optimizer.load_state_dict(data["optimizer_state_dict"])
+
+    train_loader = DataLoader(
+        dataset_config.train_data_pattern,
+        batch_size=train_config.batch_size,
+        seq_len=train_config.seq_len,
+        world_size=ddp_world_size,
+        rank=ddp_rank,
+    )
+    train_loader.load_state_dict(data["train_loader"])
+
+    if data["val_loader"] is not None:
+        val_loader = DataLoader(
+            dataset_config.val_data_pattern,
+            batch_size=train_config.batch_size,
+            seq_len=train_config.seq_len,
+            world_size=ddp_world_size,
+            rank=ddp_rank,
+        )
+        val_loader.load_state_dict(data["val_loader"])
+
+    return (
+        run_id,
+        model,
+        optimizer,
+        train_config,
+        dataset_config,
+        train_loader,
+        val_loader,
+        data["step"],
+    )
 
 
 def run(
@@ -73,40 +159,6 @@ def run(
     )
     device_type = "cuda" if "cuda" in device else "cpu"
 
-    output_dir = (
-        None if train_config.output_dir == "" else Path(train_config.output_dir)
-    )
-
-    # calculate the number of gradient accumulation steps from the desired total batch
-    # size, minibatch size, and sequence length
-    # Having multiple steps allows us to update model with larger batch size than can
-    # be handled by the hardware in a single batch
-    tokens_per_fwdbwd = train_config.batch_size * train_config.seq_len * ddp_world_size
-    assert train_config.total_batch_size % tokens_per_fwdbwd == 0
-    grad_accum_steps = train_config.total_batch_size // tokens_per_fwdbwd
-    print0(f"total desired batch size: {train_config.total_batch_size}")
-    print0(f"=> calculated gradient accumulation steps: {grad_accum_steps}")
-
-    logger = RunLogger(
-        run_name=f"{model_config.model_name}_{dataset_config.name}",
-        is_master_process=is_master_process,
-        output_dir=output_dir,
-        use_wandb=train_config.use_wandb,
-    )
-
-    train_config_dict = asdict(train_config)
-    train_config_dict["grad_accum_steps"] = grad_accum_steps
-    logger.log_config(
-        {
-            "pytorch_version": torch.version.__version__,
-            "device": device,
-            "device_type": device_type,
-            "train_config": train_config_dict,
-            "model_config": asdict(model_config),
-            "dataset_config": asdict(dataset_config),
-        }
-    )
-
     # set up a context manager following the desired dtype and device
     # torch.autocast takes care of mixed-precision, basically setting the precision
     # based on the operation being performed
@@ -131,34 +183,98 @@ def run(
     if train_config.tensorcores:
         torch.set_float32_matmul_precision("high")
 
-    # tokenizer
-    enc = model_config.get_tokenizer()
-
-    # load model
-    model, optimizer = model_config.get_model_and_optimizer(device=device)
-
-    # setup dataloaders
-    train_loader = DataLoader(
-        dataset_config.train_data_pattern,
-        batch_size=train_config.batch_size,
-        seq_len=train_config.seq_len,
-        world_size=ddp_world_size,
-        rank=ddp_rank,
+    output_dir = (
+        None if train_config.output_dir == "" else Path(train_config.output_dir)
     )
-    val_loader = None
-    if dataset_config.val_data_pattern is not None:
-        val_loader = DataLoader(
-            dataset_config.val_data_pattern,
+
+    # calculate the number of gradient accumulation steps from the desired total batch
+    # size, minibatch size, and sequence length
+    # Having multiple steps allows us to update model with larger batch size than can
+    # be handled by the hardware in a single batch
+    tokens_per_fwdbwd = train_config.batch_size * train_config.seq_len * ddp_world_size
+    assert train_config.total_batch_size % tokens_per_fwdbwd == 0
+    grad_accum_steps = train_config.total_batch_size // tokens_per_fwdbwd
+    print0(f"total desired batch size: {train_config.total_batch_size}")
+    print0(f"=> calculated gradient accumulation steps: {grad_accum_steps}")
+
+    snapshot_path = get_snapshot_path()
+    if snapshot_path.exists():
+        print0("Found snapshot, resuming from snapshot")
+        (
+            run_id,
+            model,
+            optimizer,
+            train_config,
+            dataset_config,
+            train_loader,
+            val_loader,
+            starting_step,
+        ) = load_snapshot(snapshot_path, device, ddp_world_size, ddp_rank)
+        logger = RunLogger(
+            run_id=run_id,
+            run_name=f"{model_config.model_name}_{dataset_config.name}",
+            is_master_process=is_master_process,
+            output_dir=output_dir,
+            use_wandb=train_config.use_wandb,
+            resume_from=f"{run_id}?_step={starting_step}",
+        )
+        logger.log(f"Resuming {run_id} from step {starting_step}")
+    else:
+        run_id = uuid.uuid4().hex
+        print0(f"Starting new run {run_id}")
+        starting_step = 0
+        logger = RunLogger(
+            run_id=run_id,
+            run_name=f"{model_config.model_name}_{dataset_config.name}",
+            is_master_process=is_master_process,
+            output_dir=output_dir,
+            use_wandb=train_config.use_wandb,
+            resume_from=None,
+        )
+
+        train_config_dict = asdict(train_config)
+        train_config_dict["grad_accum_steps"] = grad_accum_steps
+        logger.log_config(
+            {
+                "pytorch_version": torch.version.__version__,
+                "device": device,
+                "device_type": device_type,
+                "train_config": train_config_dict,
+                "model_config": asdict(model_config),
+                "dataset_config": asdict(dataset_config),
+            }
+        )
+
+        # load model
+        model, optimizer = model_config.get_model_and_optimizer(device=device)
+
+        # setup dataloaders
+        train_loader = DataLoader(
+            dataset_config.train_data_pattern,
             batch_size=train_config.batch_size,
             seq_len=train_config.seq_len,
             world_size=ddp_world_size,
             rank=ddp_rank,
         )
+        val_loader = None
+        if dataset_config.val_data_pattern is not None:
+            val_loader = DataLoader(
+                dataset_config.val_data_pattern,
+                batch_size=train_config.batch_size,
+                seq_len=train_config.seq_len,
+                world_size=ddp_world_size,
+                rank=ddp_rank,
+            )
+
+    # tokenizer
+    enc = model_config.get_tokenizer()
 
     # wrap model in DDP if needed
     if ddp:
         model = DDP(model, device_ids=[ddp_local_rank])
-    raw_model = model.module if ddp else model
+        raw_model = model.module
+    else:
+        raw_model = model
 
     # learning rate decay scheduler (cosine with warmup)
     get_lr = model_config.get_lr_scheduler(train_config.num_iterations)
@@ -170,7 +286,7 @@ def run(
     # main training loop
     logger.log(f"Starting training for {train_config.num_iterations} iterations")
     timings = []
-    for step in range(train_config.num_iterations + 1):
+    for step in range(starting_step, train_config.num_iterations + 1):
         final_step = step == train_config.num_iterations
 
         # once in a while evaluate the validation dataset
@@ -178,7 +294,7 @@ def run(
             train_config.val_loss_every > 0
             and (step % train_config.val_loss_every == 0 or final_step)
         ) and (val_loader is not None):
-            val_t0 = time.time()
+            val_t0 = time.monotonic()
             model.eval()
             val_loader.reset()
             with torch.no_grad():
@@ -190,11 +306,12 @@ def run(
                     val_loss += loss.item()
                 val_loss /= train_config.val_max_steps
             # log to console and to file
-            val_t1 = time.time()
+            val_t1 = time.monotonic()
             logger.log_metrics(
                 {"val_loss": val_loss, "val_time": (val_t1 - val_t0) * 1000}, step=step
             )
-        # once in a while perform model inference on the master process
+        # once in a while perform m
+        # odel inference on the master process
         if (
             train_config.sample_every > 0
             and (step % train_config.sample_every == 0 or final_step)
@@ -207,6 +324,7 @@ def run(
             start_ids = [enc.eot_token]
             xg = torch.tensor(start_ids, dtype=torch.long, device=device)[None, ...]
             max_new_tokens = 32
+
             temperature = 1.0
             top_k = 40
             yg = model.generate(
@@ -224,7 +342,7 @@ def run(
             break
 
         # Training section
-        t0 = time.time()
+        t0 = time.monotonic()
         model.train()
         optimizer.zero_grad(set_to_none=True)
         # micro-batch loop where we accumulate gradients for total batch size
@@ -277,7 +395,7 @@ def run(
         elif device == "cuda":
             torch.cuda.synchronize()
         # time and print
-        t1 = time.time()
+        t1 = time.monotonic()
         tokens_per_second = (
             grad_accum_steps
             * ddp_world_size
@@ -303,12 +421,43 @@ def run(
         if (
             output_dir is not None
             and is_master_process
-            and step > 1
             and train_config.save_every > 0
+            and step > 0
             and step % train_config.save_every == 0
         ):
+            save_start_time = time.monotonic()
             logger.log(f"saving model to {output_dir}/model_s{step}.pt")
             raw_model.save_model(f"{output_dir}/model_s{step}.pt")
+            save_end_time = time.monotonic()
+            logger.log(f"model saved in {save_end_time - save_start_time} seconds")
+
+        if (
+            train_config.snapshot_every > 0
+            and step > 0
+            and step % train_config.snapshot_every == 0
+        ):
+            logger.log(f"saving snapshot to {snapshot_path}")
+            snapshot_start_time = time.monotonic()
+            if ddp and isinstance(optimizer, ZeroRedundancyOptimizer):
+                # consolidates the sharded optimizer state to the master process
+                # needs to be called on all ranks prior to saving the optimizer state
+                optimizer.consolidate_state_dict(to=0)
+
+            if is_master_process:
+                save_snapshot(
+                    run_id,
+                    raw_model,
+                    optimizer,
+                    train_config,
+                    dataset_config,
+                    train_loader,
+                    val_loader,
+                    step,
+                )
+                snapshot_end_time = time.monotonic()
+                logger.log(
+                    f"snapshot saved in {snapshot_end_time - snapshot_start_time} seconds"
+                )
 
     # print the average of the last 20 timings, to get something smooth-ish
     timings = timings[-20:]
@@ -337,6 +486,21 @@ def run(
             f"saving final model to {output_dir}/model_s{train_config.num_iterations}.pt"
         )
         raw_model.save_model(f"{output_dir}/model_s{train_config.num_iterations}.pt")
+
+    if is_master_process and train_config.snapshot_every > 0:
+        logger.log(f"saving final snapshot to {snapshot_path}")
+        save_snapshot(
+            run_id,
+            raw_model,
+            optimizer,
+            train_config,
+            dataset_config,
+            train_loader,
+            val_loader,
+            train_config.num_iterations,
+        )
+
+    logger.log(f"Finished training {run_id}")
 
     if not is_master_process:
         return {}

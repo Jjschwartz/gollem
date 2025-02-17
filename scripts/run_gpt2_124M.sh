@@ -19,9 +19,15 @@
 # Notes for tinystories:
 # - 925,653,391 tokens
 # - num_iterations = 925653391 / 524288 = 1766
+
+# Additional notes:
+# Depending on your machine and whether it has NVLink setup or not you may need to
+# set `NCCL_P2P_DISABLE=1` to disable P2P communication between GPUs.
+# Basically if you try running this script and it hangs at the DDP call, then you
+# should first try setting this variable to 1 and see if that fixes it.
 echo "Running GPT2 124M model"
-uv run torchrun --standalone --nproc_per_node=4 gollem/train_gpt2.py \
-    --dataset fineweb_edu_10B \
+uv run torchrun --standalone --nproc_per_node=8 gollem/train_gpt2.py \
+    --dataset tinystories \
     --model.model_name gpt2_124M \
     --model.n_ctx 1024 \
     --model.n_layer 12 \
@@ -41,16 +47,17 @@ uv run torchrun --standalone --nproc_per_node=4 gollem/train_gpt2.py \
     --model.compile True \
     --model.zero_optimizer True \
     --model.from_pretrained False \
-    --train.output_dir results/gpt2_fineweb_edu_10B \
+    --train.output_dir results/gpt2_tinystories \
     --train.seed 42 \
     --train.batch_size 16 \
     --train.seq_len 1024 \
     --train.total_batch_size 524288 \
-    --train.num_iterations 18865 \
+    --train.num_iterations 1766 \
     --train.val_loss_every 250 \
     --train.val_max_steps 20 \
     --train.sample_every 0 \
     --train.save_every 500 \
+    --train.snapshot_every 5 \
     --train.device auto \
     --train.dtype bfloat16 \
     --train.tensorcores True \

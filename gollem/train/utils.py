@@ -1,7 +1,26 @@
 import platform
+from pathlib import Path
 
 import psutil
 import torch
+
+from gollem.utils import get_base_dir_path
+
+
+def get_snapshot_dir() -> Path:
+    """Path to the directory where the snapshot for the current run is stored."""
+    base_dir = get_base_dir_path()
+    snapshot_dir = base_dir / "results" / "snapshots"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    return snapshot_dir
+
+
+def clear_snapshot_dir() -> None:
+    """Clear the snapshot directory."""
+    snapshot_dir = get_snapshot_dir()
+    if snapshot_dir.exists():
+        for file in snapshot_dir.iterdir():
+            file.unlink()
 
 
 def check_dtype_support() -> list[str]:

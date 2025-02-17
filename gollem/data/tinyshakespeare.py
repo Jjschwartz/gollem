@@ -25,6 +25,7 @@ from gollem.data.common import write_datafile
 from gollem.data.config import DataConfig
 from gollem.tokenizer import BaseTokenizer
 from gollem.tokenizer import get_tokenizer
+from gollem.utils import print0
 
 
 THIS_DATA_CACHE_DIR = DATA_CACHE_DIR / "tinyshakespeare"
@@ -49,7 +50,7 @@ def tokenize(tokenizer: BaseTokenizer) -> tuple[Path, Path]:
     val_filename = encoder_data_dir / "tiny_shakespeare_val.bin"
     train_filename = encoder_data_dir / "tiny_shakespeare_train.bin"
     if val_filename.exists() and train_filename.exists():
-        print("Tokenized data already exists, skipping tokenization...")
+        print0("Tokenized data already exists, skipping tokenization...")
         return val_filename, train_filename
 
     data_filename = THIS_DATA_CACHE_DIR / "tiny_shakespeare.txt"

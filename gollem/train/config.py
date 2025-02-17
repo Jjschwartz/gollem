@@ -22,8 +22,13 @@ class TrainConfig:
     val_max_steps: int = 20
     # How often to sample from the model.
     sample_every: int = 0
-    # Whether to save the model checkpoint.
+    # How often to save the model weights (0 = never).
+    # This saves everything needed to load the model, but not the training state.
+    # E.g. for running inference and evaluation on different model states.
     save_every: int = 0
+    # How often to take a snapshot of the training state (0 = never).
+    # Snapshotting is used for resuming training from a checkpoint.
+    snapshot_every: int = 0
 
     # Device and memory management and optimization options
     # Device to use (autodetect by default, if empty or set to "auto").
