@@ -7,6 +7,11 @@ import torch
 
 from gollem.utils import print0
 
+# TODO improve saving and loading
+#   currently these could be wrong for distributed training, need to make it so
+#   we can deterministically get the current position in the dataset from
+#   (rank, world_size, epoch)
+
 
 def _peek_data_shard(filename: str) -> int:
     # only reads the header, returns header data

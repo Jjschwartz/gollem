@@ -40,6 +40,7 @@ def save_snapshot(
     step: int,
 ) -> None:
     snapshot_path = get_snapshot_path()
+
     data = {
         "run_id": run_id,
         "model_state_dict": model.state_dict(),
@@ -69,14 +70,13 @@ def load_snapshot(
     DataLoader | None,
     int,
 ]:
-    data = torch.load(snapshot_path, weights_only=False)
+    data = torch.load(snapshot_path, map_location=device, weights_only=False)
     run_id = data["run_id"]
     model_config = data["model_config"]
     train_config = data["train_config"]
     dataset_config = data["dataset_config"]
 
     model, optimizer = model_config.get_model_and_optimizer(device=device)
-
     model.load_state_dict(data["model_state_dict"])
     optimizer.load_state_dict(data["optimizer_state_dict"])
 
@@ -208,8 +208,9 @@ def run(
             dataset_config,
             train_loader,
             val_loader,
-            starting_step,
+            snapshot_step,
         ) = load_snapshot(snapshot_path, device, ddp_world_size, ddp_rank)
+        starting_step = snapshot_step + 1
         logger = RunLogger(
             run_id=run_id,
             run_name=f"{model_config.model_name}_{dataset_config.name}",
