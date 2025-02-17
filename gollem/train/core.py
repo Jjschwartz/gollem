@@ -70,7 +70,7 @@ def load_snapshot(
     DataLoader | None,
     int,
 ]:
-    data = torch.load(snapshot_path, map_location=device, weights_only=False)
+    data = torch.load(snapshot_path, weights_only=False)
     run_id = data["run_id"]
     model_config = data["model_config"]
     train_config = data["train_config"]
@@ -79,6 +79,17 @@ def load_snapshot(
     model, optimizer = model_config.get_model_and_optimizer(device=device)
     model.load_state_dict(data["model_state_dict"])
     optimizer.load_state_dict(data["optimizer_state_dict"])
+
+    if isinstance(optimizer, ZeroRedundancyOptimizer):
+        # There is an annoying bug in the ZeroRedundancyOptimizer when using load_state_dict
+        # where zero-dimensional tensors (like Adam "step") are forced on to the CPU
+        # so we need to move them to the correct device
+        # See: https://github.com/pytorch/pytorch/issues/124133
+        # And also the code: https://github.com/pytorch/pytorch/blob/1cf62e86a47ee575b5fbb997fd00f60ef0163130/torch/distributed/optim/zero_redundancy_optimizer.py#L1177
+        for param, values in optimizer.optim.state.items():
+            for k, v in values.items():
+                if torch.is_tensor(v):
+                    optimizer.optim.state[param][k] = v.to(device)
 
     train_loader = DataLoader(
         dataset_config.train_data_pattern,
@@ -385,8 +396,15 @@ def run(
         lr = get_lr(step)
         for param_group in optimizer.param_groups:
             param_group["lr"] = lr
+
         # step the optimizer
-        optimizer.step()
+        try:
+            optimizer.step()
+        except Exception as e:
+            print(f"Error stepping optimizer: {e}")
+            import pdb
+
+            pdb.set_trace()
 
         # end of training section
 

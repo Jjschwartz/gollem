@@ -27,7 +27,7 @@
 # should first try setting this variable to 1 and see if that fixes it.
 echo "Running GPT2 124M model"
 # uv run python gollem/train_gpt2.py \
-uv run torchrun --standalone --nproc_per_node=1 gollem/train_gpt2.py \
+uv run torchrun --standalone --nproc_per_node=8 gollem/train_gpt2.py \
     --dataset tinystories \
     --model.model_name gpt2_124M \
     --model.n_ctx 1024 \
