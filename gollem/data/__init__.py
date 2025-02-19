@@ -25,11 +25,18 @@ dataset_registry = {
 def load_dataset(
     name: str,
     encoder: BaseTokenizer,
+    include_val_set: bool = True,
 ) -> DataConfig:
     assert name in dataset_registry
     dataset_module_name, load_fn_name, load_fn_kwargs = dataset_registry[name]
     dataset_module = importlib.import_module(f"gollem.data.{dataset_module_name}")
+
     load_fn = getattr(dataset_module, load_fn_name)
     if load_fn_kwargs is None:
-        return load_fn(encoder)
-    return load_fn(encoder, **load_fn_kwargs)
+        config = load_fn(encoder)
+    else:
+        config = load_fn(encoder, **load_fn_kwargs)
+
+    if not include_val_set:
+        config.val_data = None
+    return config

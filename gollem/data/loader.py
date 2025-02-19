@@ -8,12 +8,6 @@ import torch
 from gollem.utils import print0
 
 
-# TODO improve saving and loading
-#   currently these could be wrong for distributed training, need to make it so
-#   we can deterministically get the current position in the dataset from
-#   (rank, world_size, epoch)
-
-
 def _peek_data_shard(filename: str) -> int:
     # only reads the header, returns header data
     with open(filename, "rb") as f:
@@ -104,19 +98,25 @@ class DataLoader:
         self.current_step_in_shard = 0
         self.tokens = _load_data_shard(self.files[self.current_shard])
 
+    @property
+    def current_position(self) -> int:
+        return (
+            (self.current_step_in_shard * self.world_size + self.rank)
+            * self.batch_size
+            * self.seq_len
+        )
+
     def next_batch(self) -> tuple[torch.Tensor, torch.Tensor]:
         B, T = self.batch_size, self.seq_len
-        W, R = self.world_size, self.rank
-        current_position = (self.current_step_in_shard * W + R) * B * T
-        buf = self.tokens[current_position : current_position + B * T + 1]
+        buf = self.tokens[self.current_position : self.current_position + B * T + 1]
         buf = torch.tensor(buf.astype(np.int32), dtype=torch.long)
         x = (buf[:-1]).view(B, T)  # inputs
         y = (buf[1:]).view(B, T)  # targets
         # advance the start pointer in current shard
         self.current_step_in_shard += 1
-        next_position = (self.current_step_in_shard * W + R) * B * T
         # if loading the next batch would be out of bounds advance the shard
-        if next_position + (B * T + 1) > len(self.tokens):
+        # NOTE we recompute current position here with new current_step_in_shard
+        if self.current_position + (B * T + 1) > len(self.tokens):
             self.advance()
         self.current_step += 1
         return x, y
@@ -148,7 +148,6 @@ class DataLoader:
             # we've done >=1 full pass through the dataset,
             # so handle wrapping around to the beginning
             current_dataset_position = current_dataset_position % dataset_size
-
         ntok_so_far = 0
         for i, ntok in enumerate(self.ntok_per_shard):
             if current_dataset_position < ntok_so_far + ntok:
@@ -156,6 +155,6 @@ class DataLoader:
                 break
             ntok_so_far += ntok
         current_position_in_shard = current_dataset_position - ntok_so_far
-        self.current_step_in_shard = current_position_in_shard % step_chunk_size
+        self.current_step_in_shard = current_position_in_shard // step_chunk_size
         # load the tokens for the current shard
         self.tokens = _load_data_shard(self.files[self.current_shard])

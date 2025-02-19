@@ -65,9 +65,8 @@ def run_benchmark(
     dataset_config = load_dataset(
         "tinystories",
         encoder=model_config.get_tokenizer(),
+        include_val_set=False,
     )
-    # disable loading validation set since we don't need it
-    dataset_config.val_data_pattern = None
 
     seq_len = BASE_TRAIN_CONFIG.seq_len
     # batch size = 2^batch_size_power * seq_len
