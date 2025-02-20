@@ -21,10 +21,13 @@
 # - num_iterations = 925653391 / 524288 = 1766
 
 # Additional notes:
-# Depending on your machine and whether it has NVLink setup or not you may need to
-# set `NCCL_P2P_DISABLE=1` to disable P2P communication between GPUs.
-# Basically if you try running this script and it hangs at the DDP call, then you
-# should first try setting this variable to 1 and see if that fixes it.
+# 1. Depending on your machine and whether it has NVLink setup or not you may need to
+#    set `NCCL_P2P_DISABLE=1` to disable P2P communication between GPUs.
+#    Basically if you try running this script and it hangs at the DDP call, then you
+#    should first try setting this variable to 1 and see if that fixes it.
+# 2. You may also want to change `activation_checkpointing` to `True` in the model
+#    config depending on model size and GPU memory available
+
 echo "Running GPT2 124M model"
 # uv run python gollem/train_gpt2.py \
 uv run torchrun --standalone --nproc_per_node=8 gollem/train_gpt2.py \
@@ -48,9 +51,10 @@ uv run torchrun --standalone --nproc_per_node=8 gollem/train_gpt2.py \
     --model.compile True \
     --model.zero_optimizer True \
     --model.from_pretrained False \
+    --model.activation_checkpointing False \
     --train.output_dir results/gpt2_fineweb_edu_10B \
     --train.seed 42 \
-    --train.batch_size 16 \
+    --train.batch_size 64 \
     --train.seq_len 1024 \
     --train.total_batch_size 524288 \
     --train.num_iterations 18865 \
