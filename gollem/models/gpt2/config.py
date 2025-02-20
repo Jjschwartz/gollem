@@ -2,6 +2,7 @@
 
 import math
 from dataclasses import dataclass
+from dataclasses import field
 from typing import Callable
 from typing import Tuple
 
@@ -18,49 +19,49 @@ from gollem.utils import print0
 @dataclass
 class GPT2Config(ModelConfig):
     # Name of the model
-    model_name: str = "gpt2"
+    model_name: str = field(default="gpt2")
     # Context length
-    n_ctx: int = 1024
+    n_ctx: int = field(default=1024)
     # Number of layers
-    n_layer: int = 12
+    n_layer: int = field(default=12)
     # Number of attention heads
-    n_head: int = 12
+    n_head: int = field(default=12)
     # Model dimension
-    d_model: int = 768
+    d_model: int = field(default=768)
     # MLP dimension
-    d_mlp: int = 4 * 768
+    d_mlp: int = field(default=4 * 768)
     # Vocabulary size
-    vocab_size: int = 50257
+    vocab_size: int = field(default=50257)
     # Whether to use layer normalization bias
-    ln_bias: bool = True
+    ln_bias: bool = field(default=True)
     # Whether to use MLP bias
-    mlp_bias: bool = True
+    mlp_bias: bool = field(default=True)
     # Whether to share embedding parameters
-    share_embd_params: bool = True
-    # Learning rate.
-    learning_rate: float = 1e-4
-    # Learning rate warmup iterations.
-    warmup_iters: int = 0
-    # Learning rate decay fraction (final learning rate = learning_rate * learning_rate_decay_frac).
-    learning_rate_decay_frac: float = 1.0
-    # Weight decay.
-    weight_decay: float = 0.0
+    share_embd_params: bool = field(default=True)
+    # Learning rate
+    learning_rate: float = field(default=1e-4)
+    # Learning rate warmup iterations
+    warmup_iters: int = field(default=0)
+    # Learning rate decay fraction (final learning rate = learning_rate * learning_rate_decay_frac)
+    learning_rate_decay_frac: float = field(default=1.0)
+    # Weight decay
+    weight_decay: float = field(default=0.0)
     # Max gradient magnitude.
-    grad_clip: float = 1.0
+    grad_clip: float = field(default=1.0)
     # adamw beta params
-    betas: Tuple[float, float] = (0.9, 0.95)
+    betas: Tuple[float, float] = field(default=(0.9, 0.95))
     # Use fused version of AdamW optimizer.
-    fused_adamw: bool = True
+    fused_adamw: bool = field(default=True)
     # Use ZeroRedundancyOptimizer.
-    zero_optimizer: bool = True
+    zero_optimizer: bool = field(default=True)
     # Use flash attention.
-    flash: bool = True
+    flash: bool = field(default=True)
     # Use activation checkpointing
-    activation_checkpointing = False
+    activation_checkpointing: bool = field(default=False)
     # Torch.compile the model.
-    compile: bool = True
+    compile: bool = field(default=True)
     # Load from pretrained weights
-    from_pretrained: bool = False
+    from_pretrained: bool = field(default=False)
 
     def get_tokenizer(self) -> BaseTokenizer:
         return get_tokenizer("gpt2")
