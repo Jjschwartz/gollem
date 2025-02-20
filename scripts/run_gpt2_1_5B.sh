@@ -1,7 +1,9 @@
 #!/bin/bash
 
 # Train GPT2 1.5B model
-# Ref for hyperparams: https://github.com/karpathy/llm.c/blob/master/scripts/pyrun_gpt2_124M.sh
+# Ref for hyperparams: 
+# https://github.com/karpathy/llm.c/blob/master/scripts/pyrun_gpt2_124M.sh
+# https://github.com/karpathy/llm.c/blob/master/scripts/run_gpt2_1558M.sh
 
 # May need to adjust batch size based on the GPU memory available
 # So far GPT2 1.5B won't fit on 24GB GPU.
@@ -17,10 +19,6 @@
 # - note technically 10B / 1048576 = 9,536 and 9500*1048576 = 9,961,472,000, so 
 #   we are a bit off, but close enough. 9500 should hopefully account for truncation
 #   of dataset shards.
-
-    # Notes for tinystories:
-    # - 925,653,391 tokens
-    # - num_iterations = 925653391 / 524288 = 1766
 
 # Additional notes:
 # 1. Depending on your machine and whether it has NVLink setup or not you may need to
