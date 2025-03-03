@@ -131,21 +131,28 @@ def evaluate(
 
 
 def run_eval_from_model_checkpoint(
-    checkpoint_path: str, device: str | torch.device | None, batch_size: int = 4, split: str = "val"
+    checkpoint_path: str,
+    device: str | torch.device | None,
+    batch_size: int = 4,
+    split: str = "val",
 ):
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"Evaluating on {device}")
 
     model = load_model(checkpoint_path, device)
     evaluate(model, device, batch_size, split)
 
 
 def run_eval_from_model_desc(
-    model_desc: str, device: str | torch.device | None = None, batch_size: int = 4, split: str = "val"
+    model_desc: str,
+    device: str | torch.device | None = None,
+    batch_size: int = 4,
+    split: str = "val",
 ):
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
-
+    print(f"Evaluating on {device}")
     model_cfg = get_model_config(model_desc)
     model = model_cfg.get_model_and_optimizer(device)[0]
     evaluate(model, device, batch_size)
@@ -159,7 +166,9 @@ if __name__ == "__main__":
     parser.add_argument("-d", "--device", type=str, default=None)
     parser.add_argument("-b", "--batch_size", type=int, default=4)
     parser.add_argument("-c", "--checkpoint_path", type=str, default=None)
-    parser.add_argument("-s", "--split", type=str, default="val", choices=["val", "test", "train"])
+    parser.add_argument(
+        "-s", "--split", type=str, default="val", choices=["val", "test", "train"]
+    )
     args = parser.parse_args()
 
     if args.checkpoint_path:
@@ -167,4 +176,6 @@ if __name__ == "__main__":
             args.checkpoint_path, args.device, args.batch_size, args.split
         )
     else:
-        run_eval_from_model_desc(args.model_desc, args.device, args.batch_size, args.split)
+        run_eval_from_model_desc(
+            args.model_desc, args.device, args.batch_size, args.split
+        )
