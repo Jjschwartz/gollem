@@ -46,10 +46,27 @@ class Attention(nn.Module):
         # constant used for the attention masking
         self.register_buffer(
             "mask",
-            torch.tril(torch.ones(cfg.n_ctx, cfg.n_ctx)).view(
+            torch.triu(torch.full((cfg.n_ctx, cfg.n_ctx), float("-inf"))).view(
                 1, 1, cfg.n_ctx, cfg.n_ctx
             ),
         )
+
+        # Caches for inference
+        if cfg.use_kv_caching:
+            # KV cache
+            self.cache_k = torch.zeros(
+                (cfg.max_sample_batch_size, cfg.n_head, cfg.n_ctx, self.d_head)
+            )
+            self.cache_v = torch.zeros(
+                (cfg.max_sample_batch_size, cfg.n_head, cfg.n_ctx, self.d_head)
+            )
+            self.cache_x = None
+        else:
+            self.cache_x = torch.zeros(
+                (cfg.max_sample_batch_size, cfg.n_ctx, self.d_model)
+            )
+            self.cache_k = None
+            self.cache_v = None
 
     def forward(self, x):
         # input is the normalized residual from the previous layer
@@ -79,9 +96,7 @@ class Attention(nn.Module):
             # rescale
             attn_scores = attn_scores / math.sqrt(self.d_head)
             # apply causal mask
-            attn_scores = attn_scores.masked_fill(
-                self.mask[:, :, :T, :T] == 0, float("-inf")
-            )
+            attn_scores = attn_scores + self.mask[:, :, :T, :T]
             # softmax to generate attn patterns
             attn = attn_scores.softmax(dim=-1)
             # (B, n_head, T, T) @ (B, n_head, T, d_head) -> (B, n_head, T, d_head)
@@ -92,6 +107,100 @@ class Attention(nn.Module):
         z = z.transpose(1, 2).contiguous().view(B, T, self.d_model)
 
         # project to output: (B, T, d_model) -> (batch, T, d_model)
+        out = self.c_proj(z)
+        return out
+
+    def sample(self, x: torch.Tensor, start_pos: int) -> torch.Tensor:
+        # input is the normalized residual from the previous layer
+        # x: (batch, N, d_model)
+        #   - where N is the number of new tokens since last sample, not
+        #     the total sequence length T
+        # start_pos: int, position 0 <= p <= n_ctx of start of x in the context
+        B, N, _ = x.size()
+        T = start_pos + N  # total sequence length
+        assert (
+            self.cfg.n_ctx >= T
+        ), f"Cannot sample beyond context length: {T} > {self.cfg.n_ctx}"
+
+        if not self.cfg.use_kv_caching:
+            assert (
+                self.cache_x is not None
+            ), "Cache is not None but use_kv_caching is False"
+            self.cache_x.to(x)
+            self.cache_x[:B, start_pos:T] = x
+            # x: (B, T, d_model)
+            x = self.cache_x[:B, :T]
+            # compute query, key, value for all heads for new positions
+            # (B, N, d_model) -> (B, N, 3 * d_model)
+            qkv = self.c_attn(x)
+            # (B, N, 3 * d_model) -> (B, N, d_model), (B, N, d_model), (B, N, d_model)
+            q, k, v = qkv.split(self.d_model, dim=2)
+            # reshape each so heads are in separate dimensions and swap axes
+            # (B, N, d_model) -> (B, n_head, N, d_head)
+            k = k.view(B, T, self.n_head, self.d_head).transpose(1, 2)
+            q = q.view(B, T, self.n_head, self.d_head).transpose(1, 2)
+            v = v.view(B, T, self.n_head, self.d_head).transpose(1, 2)
+            # small optimization, we only need the last N positions of Q,
+            # since we are sampling the next token
+            q = q[:, :, start_pos:T, :]
+
+        if self.cfg.use_kv_caching:
+            assert (
+                self.cache_k is not None
+            ), "Cache is not None but use_kv_caching is True"
+            assert (
+                self.cache_v is not None
+            ), "Cache is not None but use_kv_caching is True"
+            # compute query, key, value for all heads for new positions
+            # (B, N, d_model) -> (B, N, 3 * d_model)
+            qkv = self.c_attn(x)
+            # (B, N, 3 * d_model) -> (B, N, d_model), (B, N, d_model), (B, N, d_model)
+            q, k, v = qkv.split(self.d_model, dim=2)
+
+            # reshape each so heads are in separate dimensions and swap axes
+            # (B, N, d_model) -> (B, n_head, N, d_head)
+            k = k.view(B, N, self.n_head, self.d_head).transpose(1, 2)
+            q = q.view(B, N, self.n_head, self.d_head).transpose(1, 2)
+            v = v.view(B, N, self.n_head, self.d_head).transpose(1, 2)
+            # make sure cache is on the right device
+            self.cache_k = self.cache_k.to(q)
+            self.cache_v = self.cache_v.to(q)
+            # update cache with KV values for new positions
+            self.cache_k[:B, :, start_pos:T] = k
+            self.cache_v[:B, :, start_pos:T] = v
+
+            # get cached K, V values for all positions up the current position
+            # (B, n_head, T, d_head)
+            k = self.cache_k[:B, :, :T]
+            v = self.cache_v[:B, :, :T]
+
+        # truncate mask for the current sequence positions
+        # mask: (1, 1, N, T)
+        mask = self.mask[:, :, start_pos:T, :T]
+
+        # compute and rescale attention scores
+        if self.cfg.flash:
+            # flash attention
+            # handles default scaling of 1/sqrt(d_head)
+            # z: (B, n_head, N, d_head)
+            z = F.scaled_dot_product_attention(q, k, v, is_causal=False, attn_mask=mask)
+        else:
+            # attn_scores: (B, n_head, N, T)
+            attn_scores = q @ k.transpose(-2, -1)
+            # rescale
+            attn_scores = attn_scores / math.sqrt(self.d_head)
+            # apply causal mask
+            attn_scores = attn_scores + mask
+            # softmax to generate attn patterns
+            attn = attn_scores.softmax(dim=-1)
+            # (B, n_head, N, T) @ (B, n_head, T, d_head) -> (B, n_head, N, d_head)
+            z = attn @ v
+
+        # re-assemble all head outputs side-by-side
+        # (B, n_head, N, d_head) -> (B, N, d_model)
+        z = z.transpose(1, 2).contiguous().view(B, N, self.d_model)
+
+        # project to output: (B, N, d_model) -> (batch, N, d_model)
         out = self.c_proj(z)
         return out
 
@@ -123,6 +232,11 @@ class TransformerBlock(nn.Module):
 
     def forward(self, x):
         x = x + self.attn(self.ln_1(x))
+        x = x + self.mlp(self.ln_2(x))
+        return x
+
+    def sample(self, x: torch.Tensor, start_pos: int) -> torch.Tensor:
+        x = x + self.attn.sample(self.ln_1(x), start_pos)
         x = x + self.mlp(self.ln_2(x))
         return x
 
@@ -227,6 +341,43 @@ class GPT(BaseLLM["GPT2Config"]):
             logits = None
 
         return logits, loss
+
+    @torch.inference_mode()
+    def sample(
+        self,
+        tokens: torch.Tensor,
+        start_pos: int,
+    ) -> torch.Tensor:
+        """Sample from the model."""
+        device = tokens.device
+        _, N = tokens.size()
+        T = start_pos + N
+        assert (
+            self.cfg.n_ctx >= T
+        ), f"Cannot sample sequence of length {T}, ctx size is only {self.cfg.n_ctx}"
+
+        # generate embedding
+        # token embeddings of shape (B, N, d_model)
+        tok_emb = self.transformer.wte(tokens)
+        # position embeddings of shape (N, d_model)
+        pos = torch.arange(start_pos, T, dtype=torch.long, device=device)
+        pos_emb = self.transformer.wpe(pos)
+        # combine: (B, N, d_model)
+        x = tok_emb + pos_emb
+
+        # forward thru blocks: x = (B, N, d_model)
+        for block in self.transformer.h:
+            if self.cfg.activation_checkpointing:
+                x = checkpoint(block.sample, x, start_pos, use_reentrant=False)
+            else:
+                x = block.sample(x, start_pos)
+        x = self.transformer.ln_f(x)
+
+        # inference-time mini-optimization: only forward unembed on final position
+        # note: using list [-1] to preserve the time dim
+        logits = self.lm_head(x[:, [-1], :])
+
+        return logits
 
     def configure_optimizers(self, device_type: str) -> torch.optim.Optimizer:
         # start with all of the candidate parameters

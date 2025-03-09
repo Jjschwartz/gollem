@@ -62,6 +62,10 @@ class GPT2Config(ModelConfig):
     compile: bool = field(default=True)
     # Load from pretrained weights
     from_pretrained: bool = field(default=False)
+    # Maximum batch size for sampling
+    max_sample_batch_size: int = field(default=1)
+    # whether to use KV caching for sampling or not
+    use_kv_caching: bool = field(default=False)
 
     def get_tokenizer(self) -> BaseTokenizer:
         return get_tokenizer("gpt2")
