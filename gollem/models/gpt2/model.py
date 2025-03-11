@@ -54,16 +54,23 @@ class Attention(nn.Module):
         # Caches for inference
         if cfg.use_kv_caching:
             # KV cache
-            self.cache_k = torch.zeros(
-                (cfg.max_sample_batch_size, cfg.n_head, cfg.n_ctx, self.d_head)
+            self.register_buffer(
+                "cache_k",
+                torch.zeros(
+                    (cfg.max_sample_batch_size, cfg.n_head, cfg.n_ctx, self.d_head)
+                ),
             )
-            self.cache_v = torch.zeros(
-                (cfg.max_sample_batch_size, cfg.n_head, cfg.n_ctx, self.d_head)
+            self.register_buffer(
+                "cache_v",
+                torch.zeros(
+                    (cfg.max_sample_batch_size, cfg.n_head, cfg.n_ctx, self.d_head)
+                ),
             )
             self.cache_x = None
         else:
-            self.cache_x = torch.zeros(
-                (cfg.max_sample_batch_size, cfg.n_ctx, self.d_model)
+            self.register_buffer(
+                "cache_x",
+                torch.zeros((cfg.max_sample_batch_size, cfg.n_ctx, self.d_model)),
             )
             self.cache_k = None
             self.cache_v = None
@@ -110,6 +117,7 @@ class Attention(nn.Module):
         out = self.c_proj(z)
         return out
 
+    @torch.inference_mode()
     def sample(self, x: torch.Tensor, start_pos: int) -> torch.Tensor:
         # input is the normalized residual from the previous layer
         # x: (batch, N, d_model)
@@ -126,7 +134,6 @@ class Attention(nn.Module):
             assert (
                 self.cache_x is not None
             ), "Cache is not None but use_kv_caching is False"
-            self.cache_x.to(x)
             self.cache_x[:B, start_pos:T] = x
             # x: (B, T, d_model)
             x = self.cache_x[:B, :T]
@@ -162,13 +169,9 @@ class Attention(nn.Module):
             k = k.view(B, N, self.n_head, self.d_head).transpose(1, 2)
             q = q.view(B, N, self.n_head, self.d_head).transpose(1, 2)
             v = v.view(B, N, self.n_head, self.d_head).transpose(1, 2)
-            # make sure cache is on the right device
-            self.cache_k = self.cache_k.to(q)
-            self.cache_v = self.cache_v.to(q)
             # update cache with KV values for new positions
             self.cache_k[:B, :, start_pos:T] = k
             self.cache_v[:B, :, start_pos:T] = v
-
             # get cached K, V values for all positions up the current position
             # (B, n_head, T, d_head)
             k = self.cache_k[:B, :, :T]
