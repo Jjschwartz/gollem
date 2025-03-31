@@ -34,7 +34,7 @@ def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
     frequencies. The returned tensor contains complex values in complex64 data type.
 
     Args:
-        dim (int): Dimension of the frequency tensor.
+        dim (int): Dimension of the frequency tensor (i.e. d_head).
         end (int): End index for precomputing frequencies (i.e. max sequence length)
         theta (float, optional): Scaling factor for frequency computation. Defaults to 10000.0.
 
@@ -50,6 +50,12 @@ def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
     # freqs: (end, dim // 2)
     freqs = torch.outer(t, freqs).float()
     # freqs_cis: (end, dim // 2)
+    # convert the freqs (i.e. angles) into polar coordinates represented as complex numbers
+    # the distance of each point is 1, and the angle is the frequency
+    # so each entry in freqs_cis is a complex number which encodes the freq (i.e. angle)
+    # as a cartesian coordinate (real, imag)
+    # Representing the frequency in this way makes it easy to apply the rotation matrix
+    # to a vector by simply multiplying the vector by freqs_cis
     freqs_cis = torch.polar(torch.ones_like(freqs), freqs)  # complex64
     return freqs_cis
 
@@ -79,6 +85,8 @@ def apply_rotary_emb(
     # xq: (B, T, n_head, d_head)
     # xk: (B, T, n_kv_head, d_head)
     # freqs_cis: (T, d_head)
+    B, T, n_head, d_head = xq.shape
+    assert freqs_cis.shape == (T, d_head)
 
     # reshape to complex numbers
     # TODO check if we need the .float() here
@@ -91,10 +99,8 @@ def apply_rotary_emb(
     xk_ = torch.view_as_complex(xk)
 
     # reshape for broadcasting
-    ndim = xq.ndim
-    assert 0 <= 1 < ndim
-    assert freqs_cis.shape == (xq.shape[1], xq.shape[-1])
-    shape = [d if i == 1 or i == ndim - 1 else 1 for i, d in enumerate(xq.shape)]
+    assert freqs_cis.shape == (T, d_head // 2)
+    shape = [d if i in (1, 3) else 1 for i, d in enumerate(xq_.shape)]
     freqs_cis = freqs_cis.view(*shape)
 
     xq_out = torch.view_as_real(xq_ * freqs_cis).flatten(3)
@@ -184,22 +190,15 @@ class Attention(nn.Module):
 
         xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
 
-        # compute and rescale attention scores
-        # attn_scores: (B, n_head, T, T)
-        if self.cfg.flash:
-            # flash attention
-            # handles default scaling of 1/sqrt(d_head)
-            z = F.scaled_dot_product_attention(q, k, v, is_causal=True)
-        else:
-            attn_scores = q @ k.transpose(-2, -1)
-            # rescale
-            attn_scores = attn_scores / math.sqrt(self.d_head)
-            # apply causal mask
-            attn_scores = attn_scores + self.mask[:, :, :T, :T]
-            # softmax to generate attn patterns
-            attn = attn_scores.softmax(dim=-1)
-            # (B, n_head, T, T) @ (B, n_head, T, d_head) -> (B, n_head, T, d_head)
-            z = attn @ v
+        # flash attention
+        # Expects:
+        # - xq: (B, n_head, T, d_head)
+        # - xk: (B, n_kv_head, T, d_head)
+        # - xv: (B, n_kv_head, T, d_head)
+        # Returns:
+        # - z: (B, n_head, T, d_head)
+        # handles default scaling of 1/sqrt(d_head)
+        z = F.scaled_dot_product_attention(xq, xk, xv, is_causal=True)
 
         # re-assemble all head outputs side-by-side
         # (B, n_head, T, d_head) -> (B, T, d_model)
