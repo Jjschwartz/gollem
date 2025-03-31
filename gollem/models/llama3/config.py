@@ -9,7 +9,7 @@ from typing import Tuple
 import torch
 
 from gollem.models.config import ModelConfig
-from gollem.models.gpt2.model import GPT
+from gollem.models.llama3.model import Llama3
 from gollem.models.model import BaseLLM
 from gollem.tokenizer import BaseTokenizer
 from gollem.tokenizer import get_tokenizer
@@ -68,13 +68,17 @@ class Llama3Config(ModelConfig):
     # Use activation checkpointing
     activation_checkpointing: bool = field(default=False)
     # Torch.compile the model.
-    compile: bool = field(default=True)
+    compile: bool = field(default=False)
     # Load from pretrained weights
     from_pretrained: bool = field(default=False)
     # Maximum batch size for sampling
     max_sample_batch_size: int = field(default=1)
     # whether to use KV caching for sampling or not
     use_kv_caching: bool = field(default=False)
+
+    def __post_init__(self):
+        assert self.n_head % self.n_kv_head == 0
+        assert self.d_model % self.n_head == 0
 
     def get_tokenizer(self) -> BaseTokenizer:
         return get_tokenizer("llama-3")
@@ -86,7 +90,7 @@ class Llama3Config(ModelConfig):
             device_type = "cuda" if "cuda" in device else "cpu"
         else:
             device_type = device.type
-        model = GPT.from_pretrained(self) if self.from_pretrained else GPT(self)
+        model = Llama3.from_pretrained(self) if self.from_pretrained else Llama3(self)
         model.to(device)
         optimizer = model.configure_optimizers(device_type=device_type)
 
@@ -119,13 +123,24 @@ class Llama3Config(ModelConfig):
         return get_lr
 
 
-# 150m params
+# 10M params
+# TODO actually calculate the number of params
+LLAMA3_10M_CONFIG = Llama3Config(
+    model_name="llama-3.1-10M",
+    n_layer=2,
+    n_head=2,
+    n_kv_head=2,
+    d_model=128,
+    intermediate_size=512,
+    learning_rate=6e-4,
+)
+# 150M params
 # TODO actually calculate the number of params
 LLAMA3_150M_CONFIG = Llama3Config(
     model_name="llama-3.1-150M",
     n_layer=8,
-    n_attn_heads=8,
-    n_kv_heads=8,
+    n_head=8,
+    n_kv_head=8,
     d_model=1024,
     intermediate_size=4096,  # 4 * d_model
     learning_rate=6e-4,
@@ -135,8 +150,8 @@ LLAMA3_150M_CONFIG = Llama3Config(
 LLAMA3_3B_CONFIG = Llama3Config(
     model_name="llama-3.1-3B",
     n_layer=16,
-    n_attn_heads=16,
-    n_kv_heads=8,
+    n_head=16,
+    n_kv_head=8,
     d_model=2048,
     intermediate_size=7168,  # 3.5 * d_model
     learning_rate=3e-4,
@@ -145,8 +160,8 @@ LLAMA3_3B_CONFIG = Llama3Config(
 LLAMA3_8B_CONFIG = Llama3Config(
     model_name="llama-3.1-8B",
     n_layer=32,
-    n_attn_heads=32,
-    n_kv_heads=8,
+    n_head=32,
+    n_kv_head=8,
     d_model=4096,
     intermediate_size=14336,  # 3.5 * d_model
     learning_rate=3e-4,
@@ -155,8 +170,8 @@ LLAMA3_8B_CONFIG = Llama3Config(
 LLAMA3_70B_CONFIG = Llama3Config(
     model_name="llama-3.1-70B",
     n_layer=80,
-    n_attn_heads=64,
-    n_kv_heads=8,
+    n_head=64,
+    n_kv_head=8,
     d_model=8192,
     intermediate_size=22016,  # 3.5 * d_model
     learning_rate=1.5e-4,
@@ -166,8 +181,8 @@ LLAMA3_70B_CONFIG = Llama3Config(
 LLAMA3_405B_CONFIG = Llama3Config(
     model_name="llama-3.1-405B",
     n_layer=126,
-    n_attn_heads=128,
-    n_kv_heads=8,
+    n_head=128,
+    n_kv_head=8,
     d_model=16384,
     intermediate_size=53248,  # 3.25 * d_model
     learning_rate=8e-5,
@@ -175,13 +190,18 @@ LLAMA3_405B_CONFIG = Llama3Config(
 
 
 def get_llama3_model_config(name: str) -> Llama3Config:
-    for cfg in [
+    available_configs = [
+        LLAMA3_10M_CONFIG,
         LLAMA3_150M_CONFIG,
         LLAMA3_3B_CONFIG,
         LLAMA3_8B_CONFIG,
         LLAMA3_70B_CONFIG,
         LLAMA3_405B_CONFIG,
-    ]:
+    ]
+    for cfg in available_configs:
         if cfg.model_name == name:
             return cfg
-    raise ValueError(f"No config found for name='{name}'")
+    raise ValueError(
+        f"No config found for name='{name}'. "
+        f"Available configs: {', '.join([cfg.model_name for cfg in available_configs])}"
+    )

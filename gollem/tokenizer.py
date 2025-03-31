@@ -1,9 +1,18 @@
 import abc
 from functools import cached_property
 
+import numpy as np
 import tiktoken
 from transformers import AutoTokenizer
 from transformers import PreTrainedTokenizerBase
+
+
+def get_token_dtype(n_vocab: int) -> np.uint16 | np.uint32:
+    if n_vocab <= 2**16:
+        return np.uint16  # type: ignore
+    elif n_vocab <= 2**32:
+        return np.uint32  # type: ignore
+    raise ValueError(f"Vocab size {n_vocab} is too large for uint16 or uint32")
 
 
 class BaseTokenizer(abc.ABC):
@@ -41,6 +50,10 @@ class BaseTokenizer(abc.ABC):
     @abc.abstractmethod
     def n_vocab(self) -> int:
         pass
+
+    @property
+    def token_dtype(self) -> np.uint16 | np.uint32:
+        return get_token_dtype(self.n_vocab)
 
 
 class TiktokenTokenizer(BaseTokenizer):

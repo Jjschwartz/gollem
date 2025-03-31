@@ -1,10 +1,9 @@
-"""Basic version of GPT-2 with no fancy optimizations or architecture improvements.
+"""Llama-3 implementation.
 
-Based on karpathy's implementation:
-- https://github.com/karpathy/llm.c/blob/master/train_gpt2.py
+Based on: https://github.com/meta-llama/llama/blob/main/llama/model.py
 
-Note, the naming of the weights in each module is done to match huggingface's GPT-2
-model so we can easily load pretained weights
+Note, the naming of the weights in each module is done to match the weights in the
+Llama-3 model so we can easily load pretained weights
 """
 
 import inspect
@@ -86,26 +85,51 @@ def apply_rotary_emb(
     # xk: (B, T, n_kv_head, d_head)
     # freqs_cis: (T, d_head)
     B, T, n_head, d_head = xq.shape
-    assert freqs_cis.shape == (T, d_head)
+    assert freqs_cis.shape == (
+        T,
+        d_head // 2,
+    ), f"freqs_cis.shape: {freqs_cis.shape} != (T, d_head // 2): {(T, d_head // 2)}"
 
     # reshape to complex numbers
-    # TODO check if we need the .float() here
     # (B, T, n_head, d_head) -> (B, T, n_head, d_head // 2, 2)
     xq = xq.float().reshape(*xq.shape[:-1], -1, 2)
     # (B, T, n_kv_head, d_head) -> (B, T, n_kv_head, d_head // 2, 2)
     xk = xk.float().reshape(*xk.shape[:-1], -1, 2)
     # convert to complex numbers
+    # xq: (B, T, n_head, d_head // 2)
+    # xk: (B, T, n_kv_head, d_head // 2)
     xq_ = torch.view_as_complex(xq)
     xk_ = torch.view_as_complex(xk)
 
     # reshape for broadcasting
     assert freqs_cis.shape == (T, d_head // 2)
     shape = [d if i in (1, 3) else 1 for i, d in enumerate(xq_.shape)]
-    freqs_cis = freqs_cis.view(*shape)
+    # freqs_cis: (1, T, 1, d_head // 2)
+    freqs_cis = freqs_cis.view(*shape).to(xq_.device)
 
-    xq_out = torch.view_as_real(xq_ * freqs_cis).flatten(3)
-    xk_out = torch.view_as_real(xk_ * freqs_cis).flatten(3)
+    # apply the rotation matrix to the query and key
+    # xq_encoded: (B, T, n_head, d_head // 2)
+    # xk_encoded: (B, T, n_kv_head, d_head // 2)
+    xq_encoded = xq_ * freqs_cis
+    xk_encoded = xk_ * freqs_cis
+
+    # Convert to real and then flatten
+    # x{qk}_out: (..., d_head // 2) -> (..., d_head // 2, 2) -> (..., d_head)
+    xq_out = torch.view_as_real(xq_encoded).flatten(3)
+    xk_out = torch.view_as_real(xk_encoded).flatten(3)
     return xq_out.type_as(xq), xk_out.type_as(xk)
+
+
+def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
+    """torch.repeat_interleave(x, dim=2, repeats=n_rep)"""
+    B, T, n_kv_heads, d_head = x.shape
+    if n_rep == 1:
+        return x
+    return (
+        x[:, :, :, None, :]
+        .expand(B, T, n_kv_heads, n_rep, d_head)
+        .reshape(B, T, n_kv_heads * n_rep, d_head)
+    )
 
 
 class Attention(nn.Module):
@@ -115,21 +139,20 @@ class Attention(nn.Module):
         super().__init__()
         self.cfg = cfg
         self.d_model = cfg.d_model
-        self.n_kv_head = cfg.n_kv_head
         self.n_head = cfg.n_head
+        self.n_kv_head = cfg.n_kv_head
+        self.n_kv_repeats = self.n_head // self.n_kv_head
         self.d_head = cfg.d_model // cfg.n_head
 
-        # query, key, value projections for all heads, batched together
-        self.c_attn = nn.Linear(cfg.d_model, 3 * cfg.d_model)
-        # output projection
-        self.c_proj = nn.Linear(cfg.d_model, cfg.d_model)
-        # sets flag for init weight scaling
-        self.c_proj.LLMC_RESIDUAL_SCALE_FLAG = 1  # type: ignore
-
+        # query, key, value heads
         self.wq = nn.Linear(self.d_model, self.n_head * self.d_head, bias=False)
         self.wk = nn.Linear(self.d_model, self.n_kv_head * self.d_head, bias=False)
         self.wv = nn.Linear(self.d_model, self.n_kv_head * self.d_head, bias=False)
+        # output projection
         self.wo = nn.Linear(self.d_model, self.d_model, bias=False)
+
+        # sets flag for init weight scaling
+        self.wo.LLMC_RESIDUAL_SCALE_FLAG = 1  # type: ignore
 
         # constant used for the attention masking
         self.register_buffer(
@@ -140,34 +163,33 @@ class Attention(nn.Module):
         )
 
         # Caches for inference
-        if cfg.use_kv_caching:
-            # KV cache
-            self.register_buffer(
-                "cache_k",
-                torch.zeros(
-                    (cfg.max_sample_batch_size, cfg.n_kv_head, cfg.n_ctx, self.d_head)
-                ),
-            )
-            self.register_buffer(
-                "cache_v",
-                torch.zeros(
-                    (cfg.max_sample_batch_size, cfg.n_kv_head, cfg.n_ctx, self.d_head)
-                ),
-            )
-            self.cache_x = None
-        else:
-            self.register_buffer(
-                "cache_x",
-                torch.zeros((cfg.max_sample_batch_size, cfg.n_ctx, self.d_model)),
-            )
-            self.cache_k = None
-            self.cache_v = None
+        # if cfg.use_kv_caching:
+        #     # KV cache
+        #     self.register_buffer(
+        #         "cache_k",
+        #         torch.zeros(
+        #             (cfg.max_sample_batch_size, cfg.n_kv_head, cfg.n_ctx, self.d_head)
+        #         ),
+        #     )
+        #     self.register_buffer(
+        #         "cache_v",
+        #         torch.zeros(
+        #             (cfg.max_sample_batch_size, cfg.n_kv_head, cfg.n_ctx, self.d_head)
+        #         ),
+        #     )
+        #     self.cache_x = None
+        # else:
+        #     self.register_buffer(
+        #         "cache_x",
+        #         torch.zeros((cfg.max_sample_batch_size, cfg.n_ctx, self.d_model)),
+        #     )
+        #     self.cache_k = None
+        #     self.cache_v = None
 
     def forward(
         self,
         x: torch.Tensor,
         freqs_cis: torch.Tensor,
-        mask: torch.Tensor,
     ) -> torch.Tensor:
         # input is the normalized residual from the previous layer
         # x: (batch, T, d_model)
@@ -181,14 +203,24 @@ class Attention(nn.Module):
         xv = self.wv(x)
 
         # reshape each so heads are in separate dimensions and swap axes
-        # (B, T, d_model) -> (B, n_head, T, d_head)
-        # TODO transpose now or not? (i.e. (B T n_head d_head) or (B n_head T d_head))
+        # xq: (B, T, d_model) -> (B, T, n_head, d_head)
         xq = xq.view(B, T, self.n_head, self.d_head)
-        # (B, T, d_model) -> (B, n_kv_head, T, d_head)
+        # x{k,v}: (B, T, d_model) -> (B, T, n_kv_head, d_head)
         xk = xk.view(B, T, self.n_kv_head, self.d_head)
         xv = xv.view(B, T, self.n_kv_head, self.d_head)
 
         xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
+
+        # repeat k/v heads if n_kv_heads < n_heads
+        # x{kv}: (B, T, n_kv_head, d_head) -> (B, T, n_head, d_head)
+        xk = repeat_kv(xk, self.n_kv_repeats)
+        xv = repeat_kv(xv, self.n_kv_repeats)
+
+        # Swap n_head and T axes
+        # x_{qkv}: (B, T, nhead, d_head) -> (B, n_head, T, d_head)
+        xq = xq.transpose(1, 2)
+        xk = xk.transpose(1, 2)
+        xv = xv.transpose(1, 2)
 
         # flash attention
         # Expects:
@@ -198,105 +230,110 @@ class Attention(nn.Module):
         # Returns:
         # - z: (B, n_head, T, d_head)
         # handles default scaling of 1/sqrt(d_head)
-        z = F.scaled_dot_product_attention(xq, xk, xv, is_causal=True)
+        enable_gqa = self.n_head != self.n_kv_head
+        z = F.scaled_dot_product_attention(
+            xq, xk, xv, is_causal=True, enable_gqa=enable_gqa
+        )
 
         # re-assemble all head outputs side-by-side
         # (B, n_head, T, d_head) -> (B, T, d_model)
         z = z.transpose(1, 2).contiguous().view(B, T, self.d_model)
 
         # project to output: (B, T, d_model) -> (batch, T, d_model)
-        out = self.c_proj(z)
+        out = self.wo(z)
         return out
 
     @torch.inference_mode()
     def sample(self, x: torch.Tensor, start_pos: int) -> torch.Tensor:
+        raise NotImplementedError("Not implemented")
+        # TODO implement this
         # input is the normalized residual from the previous layer
         # x: (batch, N, d_model)
         #   - where N is the number of new tokens since last sample, not
         #     the total sequence length T
         # start_pos: int, position 0 <= p <= n_ctx of start of x in the context
-        B, N, _ = x.size()
-        T = start_pos + N  # total sequence length
-        assert (
-            self.cfg.n_ctx >= T
-        ), f"Cannot sample beyond context length: {T} > {self.cfg.n_ctx}"
+        # B, N, _ = x.size()
+        # T = start_pos + N  # total sequence length
+        # assert (
+        #     self.cfg.n_ctx >= T
+        # ), f"Cannot sample beyond context length: {T} > {self.cfg.n_ctx}"
 
-        if not self.cfg.use_kv_caching:
-            assert (
-                self.cache_x is not None
-            ), "Cache is not None but use_kv_caching is False"
-            self.cache_x[:B, start_pos:T] = x
-            # x: (B, T, d_model)
-            x = self.cache_x[:B, :T]
-            # compute query, key, value for all heads for new positions
-            # (B, N, d_model) -> (B, N, 3 * d_model)
-            qkv = self.c_attn(x)
-            # (B, N, 3 * d_model) -> (B, N, d_model), (B, N, d_model), (B, N, d_model)
-            q, k, v = qkv.split(self.d_model, dim=2)
-            # reshape each so heads are in separate dimensions and swap axes
-            # (B, N, d_model) -> (B, n_head, N, d_head)
-            k = k.view(B, T, self.n_head, self.d_head).transpose(1, 2)
-            q = q.view(B, T, self.n_head, self.d_head).transpose(1, 2)
-            v = v.view(B, T, self.n_head, self.d_head).transpose(1, 2)
-            # small optimization, we only need the last N positions of Q,
-            # since we are sampling the next token
-            q = q[:, :, start_pos:T, :]
+        # if not self.cfg.use_kv_caching:
+        #     assert (
+        #         self.cache_x is not None
+        #     ), "Cache is not None but use_kv_caching is False"
+        #     self.cache_x[:B, start_pos:T] = x
+        #     # x: (B, T, d_model)
+        #     x = self.cache_x[:B, :T]
+        #     # compute query, key, value for all heads for new positions
+        #     # (B, N, d_model) -> (B, N, 3 * d_model)
+        #     qkv = self.c_attn(x)
+        #     # (B, N, 3 * d_model) -> (B, N, d_model), (B, N, d_model), (B, N, d_model)
+        #     q, k, v = qkv.split(self.d_model, dim=2)
+        #     # reshape each so heads are in separate dimensions and swap axes
+        #     # (B, N, d_model) -> (B, n_head, N, d_head)
+        #     k = k.view(B, T, self.n_head, self.d_head).transpose(1, 2)
+        #     q = q.view(B, T, self.n_head, self.d_head).transpose(1, 2)
+        #     v = v.view(B, T, self.n_head, self.d_head).transpose(1, 2)
+        #     # small optimization, we only need the last N positions of Q,
+        #     # since we are sampling the next token
+        #     q = q[:, :, start_pos:T, :]
 
-        if self.cfg.use_kv_caching:
-            assert (
-                self.cache_k is not None
-            ), "Cache is not None but use_kv_caching is True"
-            assert (
-                self.cache_v is not None
-            ), "Cache is not None but use_kv_caching is True"
-            # compute query, key, value for all heads for new positions
-            # (B, N, d_model) -> (B, N, 3 * d_model)
-            qkv = self.c_attn(x)
-            # (B, N, 3 * d_model) -> (B, N, d_model), (B, N, d_model), (B, N, d_model)
-            q, k, v = qkv.split(self.d_model, dim=2)
+        # if self.cfg.use_kv_caching:
+        #     assert (
+        #         self.cache_k is not None
+        #     ), "Cache is not None but use_kv_caching is True"
+        #     assert (
+        #         self.cache_v is not None
+        #     ), "Cache is not None but use_kv_caching is True"
+        #     # compute query, key, value for all heads for new positions
+        #     # (B, N, d_model) -> (B, N, 3 * d_model)
+        #     qkv = self.c_attn(x)
+        #     # (B, N, 3 * d_model) -> (B, N, d_model), (B, N, d_model), (B, N, d_model)
+        #     q, k, v = qkv.split(self.d_model, dim=2)
 
-            # reshape each so heads are in separate dimensions and swap axes
-            # (B, N, d_model) -> (B, n_head, N, d_head)
-            k = k.view(B, N, self.n_head, self.d_head).transpose(1, 2)
-            q = q.view(B, N, self.n_head, self.d_head).transpose(1, 2)
-            v = v.view(B, N, self.n_head, self.d_head).transpose(1, 2)
-            # update cache with KV values for new positions
-            self.cache_k[:B, :, start_pos:T] = k
-            self.cache_v[:B, :, start_pos:T] = v
-            # get cached K, V values for all positions up the current position
-            # (B, n_head, T, d_head)
-            k = self.cache_k[:B, :, :T]
-            v = self.cache_v[:B, :, :T]
+        #     # reshape each so heads are in separate dimensions and swap axes
+        #     # (B, N, d_model) -> (B, n_head, N, d_head)
+        #     k = k.view(B, N, self.n_head, self.d_head).transpose(1, 2)
+        #     q = q.view(B, N, self.n_head, self.d_head).transpose(1, 2)
+        #     v = v.view(B, N, self.n_head, self.d_head).transpose(1, 2)
+        #     # update cache with KV values for new positions
+        #     self.cache_k[:B, :, start_pos:T] = k
+        #     self.cache_v[:B, :, start_pos:T] = v
+        #     # get cached K, V values for all positions up the current position
+        #     # (B, n_head, T, d_head)
+        #     k = self.cache_k[:B, :, :T]
+        #     v = self.cache_v[:B, :, :T]
 
-        # truncate mask for the current sequence positions
-        # mask: (1, 1, N, T)
-        mask = self.mask[:, :, start_pos:T, :T]
+        # # truncate mask for the current sequence positions
+        # # mask: (1, 1, N, T)
+        # mask = self.mask[:, :, start_pos:T, :T]
 
-        # compute and rescale attention scores
-        if self.cfg.flash:
-            # flash attention
-            # handles default scaling of 1/sqrt(d_head)
-            # z: (B, n_head, N, d_head)
-            z = F.scaled_dot_product_attention(q, k, v, is_causal=False, attn_mask=mask)
-        else:
-            # attn_scores: (B, n_head, N, T)
-            attn_scores = q @ k.transpose(-2, -1)
-            # rescale
-            attn_scores = attn_scores / math.sqrt(self.d_head)
-            # apply causal mask
-            attn_scores = attn_scores + mask
-            # softmax to generate attn patterns
-            attn = attn_scores.softmax(dim=-1)
-            # (B, n_head, N, T) @ (B, n_head, T, d_head) -> (B, n_head, N, d_head)
-            z = attn @ v
+        # # compute and rescale attention scores
+        # if self.cfg.flash:
+        #     # flash attention
+        #     # handles default scaling of 1/sqrt(d_head)
+        #     # z: (B, n_head, N, d_head)
+        #     z = F.scaled_dot_product_attention(q, k, v, is_causal=False, attn_mask=mask)
+        # else:
+        #     # attn_scores: (B, n_head, N, T)
+        #     attn_scores = q @ k.transpose(-2, -1)
+        #     # rescale
+        #     attn_scores = attn_scores / math.sqrt(self.d_head)
+        #     # apply causal mask
+        #     attn_scores = attn_scores + mask
+        #     # softmax to generate attn patterns
+        #     attn = attn_scores.softmax(dim=-1)
+        #     # (B, n_head, N, T) @ (B, n_head, T, d_head) -> (B, n_head, N, d_head)
+        #     z = attn @ v
 
-        # re-assemble all head outputs side-by-side
-        # (B, n_head, N, d_head) -> (B, N, d_model)
-        z = z.transpose(1, 2).contiguous().view(B, N, self.d_model)
+        # # re-assemble all head outputs side-by-side
+        # # (B, n_head, N, d_head) -> (B, N, d_model)
+        # z = z.transpose(1, 2).contiguous().view(B, N, self.d_model)
 
-        # project to output: (B, N, d_model) -> (batch, N, d_model)
-        out = self.c_proj(z)
-        return out
+        # # project to output: (B, N, d_model) -> (batch, N, d_model)
+        # out = self.c_proj(z)
+        # return out
 
 
 class MLP(nn.Module):
@@ -308,11 +345,18 @@ class MLP(nn.Module):
     def __init__(self, cfg: "Llama3Config"):
         super().__init__()
         self.cfg = cfg
+
         self.w1 = nn.Linear(cfg.d_model, cfg.intermediate_size, bias=False)
         self.w2 = nn.Linear(cfg.intermediate_size, cfg.d_model, bias=False)
         self.w3 = nn.Linear(cfg.d_model, cfg.intermediate_size, bias=False)
+
+        # non-linearity for SwiGLU activation function
+        # Initialize it here so we get consistent state
         self.silu = nn.SiLU()
-        self.c_proj.LLMC_RESIDUAL_SCALE_FLAG = 1  # type: ignore
+
+        # Flag to indicate that the weight tensor should be scaled during initialization
+        # TODO check if this is correct for Llama-3
+        self.w3.LLMC_RESIDUAL_SCALE_FLAG = 1  # type: ignore
 
     def forward(self, x):
         return self.w2(self.silu(self.w1(x)) * self.w3(x))
@@ -337,20 +381,25 @@ class RMSNorm(nn.Module):
 class TransformerBlock(nn.Module):
     def __init__(self, cfg: "Llama3Config"):
         super().__init__()
-        self.ln_1 = RMSNorm(cfg)
-        self.attn = Attention(cfg)
-        self.ln_2 = RMSNorm(cfg)
-        self.mlp = MLP(cfg)
+        self.n_head = cfg.n_head
+        self.dim = cfg.d_model
+        self.d_head = cfg.d_model // cfg.n_head
 
-    def forward(self, x):
-        x = x + self.attn(self.ln_1(x))
-        x = x + self.mlp(self.ln_2(x))
+        self.attention_norm = RMSNorm(cfg)
+        self.attention = Attention(cfg)
+        self.ffn_norm = RMSNorm(cfg)
+        self.feed_forward = MLP(cfg)
+
+    def forward(self, x: torch.Tensor, freqs_cis: torch.Tensor) -> torch.Tensor:
+        x = x + self.attention(self.attention_norm(x), freqs_cis)
+        x = x + self.feed_forward(self.ffn_norm(x))
         return x
 
     def sample(self, x: torch.Tensor, start_pos: int) -> torch.Tensor:
-        x = x + self.attn.sample(self.ln_1(x), start_pos)
-        x = x + self.mlp(self.ln_2(x))
-        return x
+        raise NotImplementedError("Not implemented")
+        # x = x + self.attention.sample(self.attention_norm(x), start_pos)
+        # x = x + self.feed_forward(self.ffn_norm(x))
+        # return x
 
 
 class Llama3(BaseLLM["Llama3Config"]):
@@ -358,15 +407,21 @@ class Llama3(BaseLLM["Llama3Config"]):
 
     def __init__(self, cfg: "Llama3Config"):
         super().__init__(cfg)
+        self.vocab_size = cfg.vocab_size
+        self.n_layer = cfg.n_layer
 
-        self.transformer = nn.ModuleDict(
-            {
-                "wte": nn.Embedding(cfg.vocab_size, cfg.d_model),
-                "h": nn.ModuleList([TransformerBlock(cfg) for _ in range(cfg.n_layer)]),
-                "ln_f": RMSNorm(cfg),
-            }
-        )
-        self.lm_head = nn.Linear(cfg.d_model, cfg.vocab_size, bias=False)
+        self.tok_embeddings = nn.Embedding(cfg.vocab_size, cfg.d_model)
+
+        self.layers = torch.nn.ModuleList()
+        for _ in range(cfg.n_layer):
+            self.layers.append(TransformerBlock(cfg))
+
+        self.norm = RMSNorm(cfg)
+        self.output = nn.Linear(cfg.d_model, cfg.vocab_size, bias=False)
+
+        # Note that n_ctx is multiplied by 2 to allow for dynamism of token lengths
+        # while training or fine-tuning.
+        self.freqs_cis = precompute_freqs_cis(cfg.d_model // cfg.n_head, cfg.n_ctx * 2)
 
         # init all weights, use a torch rng object to be very careful
         self.init_rng = torch.Generator()
@@ -397,50 +452,39 @@ class Llama3(BaseLLM["Llama3Config"]):
         tokens: torch.Tensor,
         targets: torch.Tensor | None = None,
         return_logits: bool = True,
-        inference: bool = False,
     ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
         """Forward pass on token idxs, with optional loss computation."""
-        device = tokens.device
         _, T = tokens.size()
         assert (
             self.cfg.n_ctx >= T
         ), f"Cannot forward sequence of length {T}, ctx size is only {self.cfg.n_ctx}"
 
-        # generate embedding
-        # token embeddings of shape (B, T, d_model)
-        tok_emb = self.transformer.wte(tokens)
-        # position embeddings of shape (T, d_model)
-        pos = torch.arange(0, T, dtype=torch.long, device=device)
-        pos_emb = self.transformer.wpe(pos)
-        # combine: (B, T, d_model)
-        x = tok_emb + pos_emb
+        # token embeddings of shape
+        # x: (B, T, d_model)
+        h = self.tok_embeddings(tokens)
 
-        # forward thru blocks: x = (B, T, d_model)
-        for block in self.transformer.h:
+        # Get RoPE freqs for the current sequence
+        freqs_cis = self.freqs_cis[:T]
+
+        for layer in self.layers:
             if self.cfg.activation_checkpointing:
-                x = checkpoint(block, x, use_reentrant=False)
+                h = checkpoint(layer, h, freqs_cis, use_reentrant=False)
             else:
-                x = block(x)
-        x = self.transformer.ln_f(x)
+                h = layer(h, freqs_cis)
+        h = self.norm(h)
 
+        logits = self.output(h)
         if targets is not None:
             # if we are given some desired targets also calculate the loss
-            logits = self.lm_head(x)
             loss = F.cross_entropy(
                 logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1
             )
-        elif inference:
-            # inference-time mini-optimization: only forward unembed on final position
-            # note: using list [-1] to preserve the time dim
-            logits = self.lm_head(x[:, [-1], :])
-            loss = None
         else:
-            logits = self.lm_head(x)
             loss = None
 
-        # there are performance reasons why not returning logits is prudent,
-        # if not needed
         if not return_logits:
+            # there are performance reasons why not returning logits is prudent,
+            # if not needed
             logits = None
 
         return logits, loss
@@ -452,35 +496,36 @@ class Llama3(BaseLLM["Llama3Config"]):
         start_pos: int,
     ) -> torch.Tensor:
         """Sample from the model."""
-        device = tokens.device
-        _, N = tokens.size()
-        T = start_pos + N
-        assert (
-            self.cfg.n_ctx >= T
-        ), f"Cannot sample sequence of length {T}, ctx size is only {self.cfg.n_ctx}"
+        raise NotImplementedError("Not implemented")
+        # device = tokens.device
+        # _, N = tokens.size()
+        # T = start_pos + N
+        # assert (
+        #     self.cfg.n_ctx >= T
+        # ), f"Cannot sample sequence of length {T}, ctx size is only {self.cfg.n_ctx}"
 
-        # generate embedding
-        # token embeddings of shape (B, N, d_model)
-        tok_emb = self.transformer.wte(tokens)
-        # position embeddings of shape (N, d_model)
-        pos = torch.arange(start_pos, T, dtype=torch.long, device=device)
-        pos_emb = self.transformer.wpe(pos)
-        # combine: (B, N, d_model)
-        x = tok_emb + pos_emb
+        # # generate embedding
+        # # token embeddings of shape (B, N, d_model)
+        # tok_emb = self.transformer.wte(tokens)
+        # # position embeddings of shape (N, d_model)
+        # pos = torch.arange(start_pos, T, dtype=torch.long, device=device)
+        # pos_emb = self.transformer.wpe(pos)
+        # # combine: (B, N, d_model)
+        # x = tok_emb + pos_emb
 
-        # forward thru blocks: x = (B, N, d_model)
-        for block in self.transformer.h:
-            if self.cfg.activation_checkpointing:
-                x = checkpoint(block.sample, x, start_pos, use_reentrant=False)
-            else:
-                x = block.sample(x, start_pos)
-        x = self.transformer.ln_f(x)
+        # # forward thru blocks: x = (B, N, d_model)
+        # for block in self.transformer.h:
+        #     if self.cfg.activation_checkpointing:
+        #         x = checkpoint(block.sample, x, start_pos, use_reentrant=False)
+        #     else:
+        #         x = block.sample(x, start_pos)
+        # x = self.transformer.ln_f(x)
 
-        # inference-time mini-optimization: only forward unembed on final position
-        # note: using list [-1] to preserve the time dim
-        logits = self.lm_head(x[:, [-1], :])
+        # # inference-time mini-optimization: only forward unembed on final position
+        # # note: using list [-1] to preserve the time dim
+        # logits = self.lm_head(x[:, [-1], :])
 
-        return logits
+        # return logits
 
     def configure_optimizers(self, device_type: str) -> torch.optim.Optimizer:
         # start with all of the candidate parameters

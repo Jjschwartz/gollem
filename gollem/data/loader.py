@@ -21,7 +21,7 @@ def _peek_data_shard(filename: str) -> int:
     return ntok  # for now just return the number of tokens
 
 
-def _load_data_shard(filename: str) -> np.ndarray:
+def _load_data_shard(filename: str, token_dtype: np.uint16 | np.uint32) -> np.ndarray:
     with open(filename, "rb") as f:
         # first read the header, which is 256 int32 integers (4 bytes each)
         header = np.frombuffer(f.read(256 * 4), dtype=np.int32)
@@ -29,8 +29,11 @@ def _load_data_shard(filename: str) -> np.ndarray:
         assert header[1] == 1, "unsupported version"
         ntok = header[2]  # number of tokens (claimed)
         # the rest of it are tokens, stored as uint16
-        tokens = np.frombuffer(f.read(), dtype=np.uint16)
-    assert len(tokens) == ntok, "number of tokens read does not match header?"
+        tokens = np.frombuffer(f.read(), dtype=token_dtype)
+    assert len(tokens) == ntok, (
+        f"number of tokens read does not match header?, "
+        f"Got {len(tokens)} tokens, expected {ntok} tokens"
+    )
     return tokens
 
 
@@ -45,11 +48,14 @@ class DataLoader:
         filename_pattern: str,
         batch_size: int,
         seq_len: int,
+        token_dtype: np.uint16 | np.uint32,
         world_size: int,
         rank: int,
     ):
+        assert token_dtype in [np.uint16, np.uint32], "unsupported token dtype"
         self.batch_size = batch_size
         self.seq_len = seq_len
+        self.token_dtype = token_dtype
         self.world_size = world_size
         self.rank = rank
 
@@ -88,7 +94,9 @@ class DataLoader:
         # then don't do the work to reload it, just reset the pointer
         if self.current_shard != 0:
             self.current_shard = 0
-            self.tokens = _load_data_shard(self.files[self.current_shard])
+            self.tokens = _load_data_shard(
+                self.files[self.current_shard], self.token_dtype
+            )
         self.current_step_in_shard = 0
         self.current_step = 0
 
@@ -96,7 +104,7 @@ class DataLoader:
         """Advance to next data shard."""
         self.current_shard = (self.current_shard + 1) % len(self.files)
         self.current_step_in_shard = 0
-        self.tokens = _load_data_shard(self.files[self.current_shard])
+        self.tokens = _load_data_shard(self.files[self.current_shard], self.token_dtype)
 
     @property
     def current_position(self) -> int:
@@ -157,4 +165,4 @@ class DataLoader:
         current_position_in_shard = current_dataset_position - ntok_so_far
         self.current_step_in_shard = current_position_in_shard // step_chunk_size
         # load the tokens for the current shard
-        self.tokens = _load_data_shard(self.files[self.current_shard])
+        self.tokens = _load_data_shard(self.files[self.current_shard], self.token_dtype)

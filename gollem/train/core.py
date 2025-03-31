@@ -18,6 +18,7 @@ from gollem.data.loader import DataLoader
 from gollem.logger import RunLogger
 from gollem.models.config import ModelConfig
 from gollem.models.model import BaseLLM
+from gollem.tokenizer import BaseTokenizer
 from gollem.train.config import TrainConfig
 from gollem.train.utils import get_snapshot_dir
 from gollem.utils import print0
@@ -66,6 +67,7 @@ def load_snapshot(
     torch.optim.Optimizer,
     TrainConfig,
     DataConfig,
+    BaseTokenizer,
     DataLoader,
     DataLoader | None,
     int,
@@ -91,10 +93,12 @@ def load_snapshot(
                 if torch.is_tensor(v):
                     optimizer.optim.state[param][k] = v.to(device)
 
+    enc = model_config.get_tokenizer()
     train_loader = DataLoader(
         dataset_config.train_data_pattern,
         batch_size=train_config.batch_size,
         seq_len=train_config.seq_len,
+        token_dtype=enc.token_dtype,
         world_size=ddp_world_size,
         rank=ddp_rank,
     )
@@ -105,6 +109,7 @@ def load_snapshot(
             dataset_config.val_data_pattern,
             batch_size=train_config.batch_size,
             seq_len=train_config.seq_len,
+            token_dtype=enc.token_dtype,
             world_size=ddp_world_size,
             rank=ddp_rank,
         )
@@ -116,6 +121,7 @@ def load_snapshot(
         optimizer,
         train_config,
         dataset_config,
+        enc,
         train_loader,
         val_loader,
         data["step"],
@@ -217,6 +223,7 @@ def run(
             optimizer,
             train_config,
             dataset_config,
+            enc,
             train_loader,
             val_loader,
             snapshot_step,
@@ -260,11 +267,13 @@ def run(
         # load model
         model, optimizer = model_config.get_model_and_optimizer(device=device)
 
-        # setup dataloaders
+        # setup tokenizer and dataloaders
+        enc = model_config.get_tokenizer()
         train_loader = DataLoader(
             dataset_config.train_data_pattern,
             batch_size=train_config.batch_size,
             seq_len=train_config.seq_len,
+            token_dtype=enc.token_dtype,
             world_size=ddp_world_size,
             rank=ddp_rank,
         )
@@ -274,12 +283,10 @@ def run(
                 dataset_config.val_data_pattern,
                 batch_size=train_config.batch_size,
                 seq_len=train_config.seq_len,
+                token_dtype=enc.token_dtype,
                 world_size=ddp_world_size,
                 rank=ddp_rank,
             )
-
-    # tokenizer
-    enc = model_config.get_tokenizer()
 
     # wrap model in DDP if needed
     if ddp:
@@ -329,6 +336,7 @@ def run(
             and (step % train_config.sample_every == 0 or final_step)
             and is_master_process
         ):
+            # TODO model.generate doesn't exist
             model.eval()
             # before we end, let's also do one round of inference
             # we'll kick off the generation with "<|endoftext|>", which designates the

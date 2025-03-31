@@ -10,7 +10,12 @@ def test_dataloader():
     dataset = load_dataset("tinyshakespeare", tokenizer)
     B, T = 10, 10
     dataloader = DataLoader(
-        dataset.train_data_pattern, batch_size=B, seq_len=T, world_size=1, rank=0
+        dataset.train_data_pattern,
+        batch_size=B,
+        seq_len=T,
+        token_dtype=tokenizer.token_dtype,
+        world_size=1,
+        rank=0,
     )
     position = dataloader.current_position
 
@@ -38,7 +43,12 @@ def test_dataloader_multi_process():
     dataset = load_dataset("tinyshakespeare", tokenizer)
     B, T, W, R = 10, 10, 2, 1
     dataloader = DataLoader(
-        dataset.train_data_pattern, batch_size=B, seq_len=T, world_size=W, rank=R
+        dataset.train_data_pattern,
+        batch_size=B,
+        seq_len=T,
+        token_dtype=tokenizer.token_dtype,
+        world_size=W,
+        rank=R,
     )
     position = dataloader.current_position
 
@@ -66,12 +76,22 @@ def test_dataloader_state_dict():
 
     # test saving and loading dataloader with different ranks
     dataloader = DataLoader(
-        dataset.train_data_pattern, batch_size=B, seq_len=T, world_size=W, rank=0
+        dataset.train_data_pattern,
+        batch_size=B,
+        seq_len=T,
+        token_dtype=tokenizer.token_dtype,
+        world_size=W,
+        rank=0,
     )
     state_dict = dataloader.state_dict()
     assert state_dict["current_step"] == 0
     new_dataloader = DataLoader(
-        dataset.train_data_pattern, batch_size=B, seq_len=T, world_size=W, rank=R
+        dataset.train_data_pattern,
+        batch_size=B,
+        seq_len=T,
+        token_dtype=tokenizer.token_dtype,
+        world_size=W,
+        rank=R,
     )
     new_dataloader.load_state_dict(state_dict)
     assert new_dataloader.current_step == 0
