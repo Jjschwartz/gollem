@@ -211,14 +211,10 @@ class Attention(nn.Module):
 
         xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
 
-        # repeat k/v heads if n_kv_heads < n_heads
-        # x{kv}: (B, T, n_kv_head, d_head) -> (B, T, n_head, d_head)
-        xk = repeat_kv(xk, self.n_kv_repeats)
-        xv = repeat_kv(xv, self.n_kv_repeats)
-
         # Swap n_head and T axes
-        # x_{qkv}: (B, T, nhead, d_head) -> (B, n_head, T, d_head)
+        # xq: (B, T, nhead, d_head) -> (B, n_head, T, d_head)
         xq = xq.transpose(1, 2)
+        # x{k,v}: (B, T, n_kv_head, d_head) -> (B, n_kv_head, T, d_head)
         xk = xk.transpose(1, 2)
         xv = xv.transpose(1, 2)
 

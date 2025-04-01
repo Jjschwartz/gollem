@@ -68,7 +68,7 @@ class Llama3Config(ModelConfig):
     # Use activation checkpointing
     activation_checkpointing: bool = field(default=False)
     # Torch.compile the model.
-    compile: bool = field(default=False)
+    compile: bool = field(default=True)
     # Load from pretrained weights
     from_pretrained: bool = field(default=False)
     # Maximum batch size for sampling
@@ -123,10 +123,10 @@ class Llama3Config(ModelConfig):
         return get_lr
 
 
-# 10M params
-# TODO actually calculate the number of params
-LLAMA3_10M_CONFIG = Llama3Config(
-    model_name="llama-3.1-10M",
+# 33M params
+# 99% of params ar in the input and output embeddings
+LLAMA3_33M_CONFIG = Llama3Config(
+    model_name="llama-3.1-33M",
     n_layer=2,
     n_head=2,
     n_kv_head=2,
@@ -134,26 +134,27 @@ LLAMA3_10M_CONFIG = Llama3Config(
     intermediate_size=512,
     learning_rate=6e-4,
 )
-# 150M params
-# TODO actually calculate the number of params
-LLAMA3_150M_CONFIG = Llama3Config(
-    model_name="llama-3.1-150M",
+# 272M params
+# Similar to GPT-2 124M but with larger vocab size so more parameters in the embeddings
+LLAMA3_272M_CONFIG = Llama3Config(
+    model_name="llama-3.1-272M",
     n_layer=8,
     n_head=8,
     n_kv_head=8,
-    d_model=1024,
-    intermediate_size=4096,  # 4 * d_model
+    d_model=768,
+    intermediate_size=3072,  # 4 * d_model
     learning_rate=6e-4,
 )
-# 3B params
-# TODO actually calculate the number of params
-LLAMA3_3B_CONFIG = Llama3Config(
-    model_name="llama-3.1-3B",
-    n_layer=16,
-    n_head=16,
+# 2B params
+# Similar architecture to GPT-2 1.5B in terms of n_layers, n_heads, d_model
+# But with larger vocab size and using GQA
+LLAMA3_2B_CONFIG = Llama3Config(
+    model_name="llama-3.1-2B",
+    n_layer=48,
+    n_head=24,
     n_kv_head=8,
-    d_model=2048,
-    intermediate_size=7168,  # 3.5 * d_model
+    d_model=1536,  # n_head * 64
+    intermediate_size=6144,  # 4 * d_model to nearest multiple of 2048
     learning_rate=3e-4,
 )
 # 8B params
@@ -162,7 +163,7 @@ LLAMA3_8B_CONFIG = Llama3Config(
     n_layer=32,
     n_head=32,
     n_kv_head=8,
-    d_model=4096,
+    d_model=4096,  # d_head = 128
     intermediate_size=14336,  # 3.5 * d_model
     learning_rate=3e-4,
 )
@@ -172,7 +173,7 @@ LLAMA3_70B_CONFIG = Llama3Config(
     n_layer=80,
     n_head=64,
     n_kv_head=8,
-    d_model=8192,
+    d_model=8192,  # d_head = 128
     intermediate_size=22016,  # 3.5 * d_model
     learning_rate=1.5e-4,
 )
@@ -183,7 +184,7 @@ LLAMA3_405B_CONFIG = Llama3Config(
     n_layer=126,
     n_head=128,
     n_kv_head=8,
-    d_model=16384,
+    d_model=16384,  # d_head = 128
     intermediate_size=53248,  # 3.25 * d_model
     learning_rate=8e-5,
 )
@@ -191,9 +192,9 @@ LLAMA3_405B_CONFIG = Llama3Config(
 
 def get_llama3_model_config(name: str) -> Llama3Config:
     available_configs = [
-        LLAMA3_10M_CONFIG,
-        LLAMA3_150M_CONFIG,
-        LLAMA3_3B_CONFIG,
+        LLAMA3_33M_CONFIG,
+        LLAMA3_272M_CONFIG,
+        LLAMA3_2B_CONFIG,
         LLAMA3_8B_CONFIG,
         LLAMA3_70B_CONFIG,
         LLAMA3_405B_CONFIG,
