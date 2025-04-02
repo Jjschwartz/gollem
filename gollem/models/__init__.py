@@ -4,10 +4,8 @@ from gollem.models.config import ModelConfig
 
 
 model_registry = {
-    "gpt2": ("gpt2.config", "GPT2_CONFIG"),
-    "gpt2-medium": ("gpt2.config", "GPT2_MEDIUM_CONFIG"),
-    "gpt2-large": ("gpt2.config", "GPT2_LARGE_CONFIG"),
-    "gpt2-xl": ("gpt2.config", "GPT2_XL_CONFIG"),
+    "llama3": ("llama3.config", "get_llama3_model_config"),
+    "gpt2": ("gpt2.config", "get_gpt2_model_config"),
 }
 
 
@@ -16,14 +14,21 @@ def get_model_config(name: str, **kwargs) -> ModelConfig:
 
     Any defaults will be overwridden by values in kwargs.
     """
-    assert name in model_registry
-
-    model_cfg_file, model_cfg_var = model_registry[name]
+    for registry_name in model_registry:
+        if name.startswith(registry_name):
+            model_cfg_file, model_registry_func_name = model_registry[registry_name]
+            break
+    else:
+        raise ValueError(
+            f"Model {name} not found in model registry."
+            f" Should start with one of: {', '.join(model_registry.keys())}"
+        )
 
     model_cfg_module = importlib.import_module(f"gollem.models.{model_cfg_file}")
-    model_cfg = getattr(model_cfg_module, model_cfg_var)
+    model_registry_func = getattr(model_cfg_module, model_registry_func_name)
+    model_cfg = model_registry_func(name)
 
-    if not kwargs:
-        return model_cfg
+    if kwargs:
+        model_cfg = model_cfg.override(**kwargs)
 
-    return model_cfg.override(model_cfg, **kwargs)
+    return model_cfg

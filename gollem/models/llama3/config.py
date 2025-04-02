@@ -30,7 +30,9 @@ class Llama3Config(ModelConfig):
     # Name of the model
     model_name: str = field(default="llama3")
     # Context length
-    n_ctx: int = field(default=4096)
+    # NOTE: Llama3 uses up to 128k context size
+    # setting this to 1024 for now for early experiments
+    n_ctx: int = field(default=1024)
     # Number of layers
     n_layer: int = field(default=12)
     # Number of attention heads
@@ -50,7 +52,9 @@ class Llama3Config(ModelConfig):
     # Learning rate decay fraction (final learning rate = learning_rate * learning_rate_decay_frac)
     learning_rate_decay_frac: float = field(default=0.001)
     # Rope embedding base frequency
-    rope_theta: float = field(default=500000)
+    # NOTE: Llama3 uses 500k for 128k context size
+    # here we use 10k for 4096 context size
+    rope_theta: float = field(default=10000)
     # RMSNorm epsilon (A small value added to the denominator for numerical stability.)
     rmsnorm_eps: float = field(default=1e-6)
     # Weight decay
@@ -126,7 +130,7 @@ class Llama3Config(ModelConfig):
 # 33M params
 # 99% of params ar in the input and output embeddings
 LLAMA3_33M_CONFIG = Llama3Config(
-    model_name="llama-3.1-33M",
+    model_name="llama3-33M",
     n_layer=2,
     n_head=2,
     n_kv_head=2,
@@ -137,7 +141,7 @@ LLAMA3_33M_CONFIG = Llama3Config(
 # 272M params
 # Similar to GPT-2 124M but with larger vocab size so more parameters in the embeddings
 LLAMA3_272M_CONFIG = Llama3Config(
-    model_name="llama-3.1-272M",
+    model_name="llama3-272M",
     n_layer=8,
     n_head=8,
     n_kv_head=8,
@@ -149,7 +153,7 @@ LLAMA3_272M_CONFIG = Llama3Config(
 # Similar architecture to GPT-2 1.5B in terms of n_layers, n_heads, d_model
 # But with larger vocab size and using GQA
 LLAMA3_2B_CONFIG = Llama3Config(
-    model_name="llama-3.1-2B",
+    model_name="llama3-2B",
     n_layer=48,
     n_head=24,
     n_kv_head=8,
@@ -159,7 +163,7 @@ LLAMA3_2B_CONFIG = Llama3Config(
 )
 # 8B params
 LLAMA3_8B_CONFIG = Llama3Config(
-    model_name="llama-3.1-8B",
+    model_name="llama3-8B",
     n_layer=32,
     n_head=32,
     n_kv_head=8,
@@ -169,7 +173,7 @@ LLAMA3_8B_CONFIG = Llama3Config(
 )
 # 70B params
 LLAMA3_70B_CONFIG = Llama3Config(
-    model_name="llama-3.1-70B",
+    model_name="llama3-70B",
     n_layer=80,
     n_head=64,
     n_kv_head=8,
@@ -180,7 +184,7 @@ LLAMA3_70B_CONFIG = Llama3Config(
 
 # 405B params
 LLAMA3_405B_CONFIG = Llama3Config(
-    model_name="llama-3.1-405B",
+    model_name="llama3-405B",
     n_layer=126,
     n_head=128,
     n_kv_head=8,
@@ -189,9 +193,9 @@ LLAMA3_405B_CONFIG = Llama3Config(
     learning_rate=8e-5,
 )
 
-
-def get_llama3_model_config(name: str) -> Llama3Config:
-    available_configs = [
+LLAMA3_CONFIGS = {
+    cfg.model_name: cfg
+    for cfg in [
         LLAMA3_33M_CONFIG,
         LLAMA3_272M_CONFIG,
         LLAMA3_2B_CONFIG,
@@ -199,10 +203,13 @@ def get_llama3_model_config(name: str) -> Llama3Config:
         LLAMA3_70B_CONFIG,
         LLAMA3_405B_CONFIG,
     ]
-    for cfg in available_configs:
-        if cfg.model_name == name:
-            return cfg
-    raise ValueError(
-        f"No config found for name='{name}'. "
-        f"Available configs: {', '.join([cfg.model_name for cfg in available_configs])}"
-    )
+}
+
+
+def get_llama3_model_config(name: str) -> Llama3Config:
+    if name not in LLAMA3_CONFIGS:
+        raise ValueError(
+            f"No config found for name='{name}'. "
+            f"Available configs: {', '.join(LLAMA3_CONFIGS.keys())}"
+        )
+    return LLAMA3_CONFIGS[name]

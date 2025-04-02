@@ -10,8 +10,8 @@ from pprint import pprint
 
 import torch
 from gollem.data import load_dataset
-from gollem.models.gpt2.config import GPT2Config
-from gollem.models.gpt2.config import get_gpt2_model_config
+from gollem.models import get_model_config
+from gollem.models.config import ModelConfig
 from gollem.train.config import TrainConfig
 from gollem.train.core import run
 
@@ -32,7 +32,7 @@ BASE_TRAIN_CONFIG = TrainConfig(
 
 
 def run_benchmark(
-    model_config: GPT2Config,
+    model_config: ModelConfig,
     use_activation_checkpointing: bool = False,
     debug: bool = False,
 ):
@@ -43,13 +43,16 @@ def run_benchmark(
     )
     results_dir.mkdir(parents=True, exist_ok=True)
     time_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    if use_activation_checkpointing:
-        results_file_path = results_dir / f"results_{time_str}_ac.csv"
-    else:
-        results_file_path = results_dir / f"results_{time_str}.csv"
 
     if use_activation_checkpointing:
-        model_config.activation_checkpointing = use_activation_checkpointing
+        if not hasattr(model_config, "activation_checkpointing"):
+            raise ValueError(
+                f"Model {model_config.model_name} does not support activation checkpointing"
+            )
+        results_file_path = results_dir / f"results_{time_str}_ac.csv"
+        model_config.activation_checkpointing = use_activation_checkpointing  # type: ignore
+    else:
+        results_file_path = results_dir / f"results_{time_str}.csv"
 
     # save model config
     if not debug:
@@ -147,16 +150,12 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "model_name",
-        type=str,
-        choices=["gpt2", "gpt2-medium", "gpt2-large", "gpt2-xl"],
-    )
+    parser.add_argument("model_name", type=str)
     parser.add_argument("-a", "--use_activation_checkpointing", action="store_true")
     parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
 
-    model_config = get_gpt2_model_config(args.model_name)
+    model_config = get_model_config(args.model_name)
     run_benchmark(
         model_config,
         args.use_activation_checkpointing,

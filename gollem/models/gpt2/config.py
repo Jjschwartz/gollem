@@ -162,8 +162,16 @@ GPT2_XL_CONFIG = GPT2Config(
 )
 
 
+GPT2_CONFIGS = {
+    cfg.model_name: cfg
+    for cfg in [GPT2_CONFIG, GPT2_MEDIUM_CONFIG, GPT2_LARGE_CONFIG, GPT2_XL_CONFIG]
+}
+
+
 def get_gpt2_model_config(name: str) -> GPT2Config:
-    for cfg in [GPT2_CONFIG, GPT2_MEDIUM_CONFIG, GPT2_LARGE_CONFIG, GPT2_XL_CONFIG]:
-        if cfg.model_name == name:
-            return cfg
-    raise ValueError(f"No config found for name='{name}'")
+    if name not in GPT2_CONFIGS:
+        raise ValueError(
+            f"No config found for name='{name}'. "
+            f"Available configs: {', '.join(GPT2_CONFIGS.keys())}"
+        )
+    return GPT2_CONFIGS[name]

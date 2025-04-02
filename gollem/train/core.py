@@ -406,13 +406,7 @@ def run(
             param_group["lr"] = lr
 
         # step the optimizer
-        try:
-            optimizer.step()
-        except Exception as e:
-            print(f"Error stepping optimizer: {e}")
-            import pdb
-
-            pdb.set_trace()
+        optimizer.step()
 
         # end of training section
 
