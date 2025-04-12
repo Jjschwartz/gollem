@@ -149,6 +149,17 @@ LLAMA3_272M_CONFIG = Llama3Config(
     intermediate_size=3072,  # 4 * d_model
     learning_rate=6e-4,
 )
+# 1B params
+# Llama3 scaled down to 1B params (1.4B to be exact)
+LLAMA3_1B_CONFIG = Llama3Config(
+    model_name="llama3-1B",
+    n_layer=16,
+    n_head=16,
+    n_kv_head=8,
+    d_model=2048,  # d_head = 128
+    intermediate_size=7168,  # 3.5 * d_model
+    learning_rate=3e-4,
+)
 # 2B params
 # Similar architecture to GPT-2 1.5B in terms of n_layers, n_heads, d_model
 # But with larger vocab size and using GQA
@@ -198,6 +209,7 @@ LLAMA3_CONFIGS = {
     for cfg in [
         LLAMA3_33M_CONFIG,
         LLAMA3_272M_CONFIG,
+        LLAMA3_1B_CONFIG,
         LLAMA3_2B_CONFIG,
         LLAMA3_8B_CONFIG,
         LLAMA3_70B_CONFIG,
