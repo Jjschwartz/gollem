@@ -35,6 +35,7 @@ class BaseLLM(nn.Module, Generic[ModelConfigT]):
         self,
         tokens: torch.Tensor,
         max_new_tokens: int,
+        end_token: int | None = None,
         temperature: float = 1.0,
         top_k: int | None = None,
     ) -> torch.Tensor:
@@ -68,6 +69,8 @@ class BaseLLM(nn.Module, Generic[ModelConfigT]):
             next_token = torch.multinomial(probs, num_samples=1)
             # append sampled index to the running sequence and continue
             tokens = torch.cat((tokens, next_token), dim=1)
+            if end_token is not None and next_token == end_token:
+                break
 
         return tokens
 
