@@ -1,7 +1,9 @@
 import os
 import sys
+from dataclasses import asdict
 from dataclasses import dataclass
 from dataclasses import field
+from typing import Union
 
 import pyrallis
 import torch
@@ -11,6 +13,7 @@ from torch.distributed import init_process_group
 
 from gollem.data import load_dataset
 from gollem.models.gpt2.config import GPT2Config
+from gollem.models.gpt2.config import get_gpt2_model_config
 from gollem.train.config import TrainConfig
 from gollem.train.core import run
 from gollem.utils import print0
@@ -18,6 +21,9 @@ from gollem.utils import print0
 
 @dataclass
 class RunConfig:
+    # Model config to use if using pre-defined model configs
+    # (choices:"gpt2", "gpt2-medium", "gpt2-large", "gpt2-xl")
+    model_name: Union[str, None] = field(default=None)
     # Name of the dataset to use (see `gollem.data.__init__.py`)
     dataset: str = field(default="tinyshakespeare")
     # GPT2Config
@@ -35,7 +41,19 @@ def main():
         print(e)
         sys.exit(1)
 
-    model_cfg = cfg.model
+    if cfg.model_name is None:
+        model_cfg = cfg.model
+    else:
+        # Use the named model config and override any parameters that were explicitly
+        # set (these are the ones that are different from the default config values)
+        default_model_kwargs = asdict(GPT2Config())
+        model_cfg_kwargs = asdict(cfg.model)
+        changes = {}
+        for k, v in model_cfg_kwargs.items():
+            if default_model_kwargs[k] != v:
+                changes[k] = v
+        model_cfg = get_gpt2_model_config(cfg.model_name)
+        model_cfg = GPT2Config.override(model_cfg, **changes)
 
     ddp = int(os.environ.get("RANK", -1)) != -1  # is this a ddp run?
     try:

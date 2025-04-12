@@ -1,0 +1,28 @@
+{
+    "model_name": "gpt2",
+    "dataset": "tinyshakespeare",
+    "model": {
+        "fused_adamw": false,
+        "zero_optimizer": false,
+        "flash": false,
+        "activation_checkpointing": false,
+        "compile": false,
+        "from_pretrained": false,
+        "use_kv_caching": false
+    },
+    "train": {
+        "batch_size": 1,
+        "seq_len": 1024,
+        "total_batch_size": 1024,
+        "num_iterations": 1000,
+        "val_loss_every": 0,
+        "val_max_steps": 20,
+        "sample_every": 0,
+        "save_every": 0,
+        "snapshot_every": 0,
+        "device": "cpu",
+        "dtype": "float32",
+        "tensorcores": false,
+        "use_wandb": false
+    }
+}
