@@ -46,9 +46,9 @@ class Attention(nn.Module):
         # constant used for the attention masking
         self.register_buffer(
             "mask",
-            torch.triu(torch.full((cfg.n_ctx, cfg.n_ctx), float("-inf"))).view(
-                1, 1, cfg.n_ctx, cfg.n_ctx
-            ),
+            torch.triu(
+                torch.full((cfg.n_ctx, cfg.n_ctx), float("-inf")), diagonal=1
+            ).view(1, 1, cfg.n_ctx, cfg.n_ctx),
         )
 
         # Caches for inference
