@@ -3,7 +3,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from typing import Callable
 from typing import Self
-from typing import Tuple
 
 import torch
 
@@ -15,6 +14,26 @@ if TYPE_CHECKING:
 
 
 @dataclass
+class ModelParams:
+    total: int
+    per_component: dict[str, int]
+
+
+@dataclass
+class ModelActivations:
+    total: int
+    per_component: dict[str, int]
+
+
+@dataclass
+class ModelFlops:
+    total: int
+    forward_total: int
+    backward_total: int
+    per_component: dict[str, int]
+
+
+@dataclass
 class ModelConfig:
     model_name: str
 
@@ -23,7 +42,7 @@ class ModelConfig:
 
     def get_model_and_optimizer(
         self, device: str | torch.device
-    ) -> Tuple["BaseLLM", torch.optim.Optimizer]:
+    ) -> tuple["BaseLLM", torch.optim.Optimizer]:
         raise NotImplementedError()
 
     def get_lr_scheduler(self, num_iterations: int) -> Callable[[int], float]:
@@ -34,3 +53,12 @@ class ModelConfig:
         base_cfg_kwargs = asdict(existing)
         base_cfg_kwargs.update(kwargs)
         return cls(**base_cfg_kwargs)
+
+    def get_params(self) -> ModelParams:
+        raise NotImplementedError()
+
+    def compute_activations(self, batch_size: int, dtype: str) -> ModelActivations:
+        raise NotImplementedError()
+
+    def compute_flops(self) -> ModelFlops:
+        raise NotImplementedError()

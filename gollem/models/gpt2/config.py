@@ -1,14 +1,17 @@
 """Utility model config stuff."""
 
 import math
+from collections import OrderedDict
 from dataclasses import dataclass
 from dataclasses import field
 from typing import Callable
-from typing import Tuple
 
 import torch
 
+from gollem.models.config import ModelActivations
 from gollem.models.config import ModelConfig
+from gollem.models.config import ModelFlops
+from gollem.models.config import ModelParams
 from gollem.models.gpt2.model import GPT
 from gollem.models.model import BaseLLM
 from gollem.tokenizer import BaseTokenizer
@@ -49,7 +52,7 @@ class GPT2Config(ModelConfig):
     # Max gradient magnitude.
     grad_clip: float = field(default=1.0)
     # adamw beta params
-    betas: Tuple[float, float] = field(default=(0.9, 0.95))
+    betas: tuple[float, float] = field(default=(0.9, 0.95))
     # Use fused version of AdamW optimizer.
     fused_adamw: bool = field(default=True)
     # Use ZeroRedundancyOptimizer.
@@ -72,7 +75,7 @@ class GPT2Config(ModelConfig):
 
     def get_model_and_optimizer(
         self, device: str | torch.device
-    ) -> Tuple[BaseLLM, torch.optim.Optimizer]:
+    ) -> tuple[BaseLLM, torch.optim.Optimizer]:
         if isinstance(device, str):
             device_type = "cuda" if "cuda" in device else "cpu"
         else:
@@ -108,6 +111,159 @@ class GPT2Config(ModelConfig):
             return min_lr + coeff * (self.learning_rate - min_lr)
 
         return get_lr
+
+    def get_params(self) -> ModelParams:
+        out = OrderedDict()
+
+        # token and position embeddings
+        out["embedding/position"] = self.n_ctx * self.d_model
+        out["embedding/token"] = self.vocab_size * self.d_model
+        out["embedding"] = out["embedding/position"] + out["embedding/token"]
+
+        # attention blocks
+        out["attention/ln"] = self.d_model + int(self.ln_bias) * self.d_model
+        out["attention/kqv"] = self.d_model * 3 * self.d_model
+        out["attention/proj"] = self.d_model**2
+        out["attention"] = (
+            out["attention/ln"] + out["attention/kqv"] + out["attention/proj"]
+        )
+
+        # MLP blocks
+        out["mlp/ln"] = self.d_model + int(self.ln_bias) * self.d_model
+        out["mlp/ffw"] = self.d_model * self.d_mlp + int(self.ln_bias) * self.d_mlp
+        out["mlp/proj"] = self.d_mlp * self.d_model + int(self.ln_bias) * self.d_model
+        out["mlp"] = out["mlp/ln"] + out["mlp/ffw"] + out["mlp/proj"]
+
+        # the transformer and the rest of it
+        out["block"] = out["attention"] + out["mlp"]
+        out["transformer"] = self.n_layer * out["block"]
+        out["ln_f"] = self.d_model + int(self.ln_bias) * self.d_model  # final layernorm
+        if self.share_embd_params:
+            # 0 because of parameter sharing. This layer uses the weights from the embedding layer
+            out["out_embedding"] = 0
+        else:
+            out["out_embedding"] = self.d_model * self.vocab_size
+
+        # total
+        out["total"] = (
+            out["embedding"] + out["transformer"] + out["ln_f"] + out["out_embedding"]
+        )
+        return ModelParams(total=out["total"], per_component=out)
+
+    def compute_activations(self, batch_size: int, dtype: str) -> ModelActivations:
+        # Total: $8B + 16T + L \times (34TBH + 5AT^2B) + 4TBH$
+        out = OrderedDict()
+
+        B = batch_size
+        TBH = self.n_ctx * B * self.d_model
+
+        bytes_per_activation = 2 if dtype in ["bfloat16", "float16"] else 4
+        bytes_per_long = 8
+
+        # token and position embeddings
+        out["embedding/position"] = self.n_ctx * bytes_per_long
+        out["embedding/token"] = self.n_ctx * B * bytes_per_long
+        out["embedding"] = out["embedding/position"] + out["embedding/token"]
+
+        # attention blocks
+        out["attention/ln"] = TBH * bytes_per_activation
+        out["attention/kqv"] = TBH * bytes_per_activation
+        if self.flash:
+            # when using flash attention a bunch of optimizations are done
+            out["attention/qk_matmul"] = 0
+            out["attention/softmax"] = 0
+            # flash attention requires K, Q, V as well as two vectors l, m of length T (size BT)
+            out["attention/attention_over_v"] = (
+                TBH * 3 + 2 * self.n_ctx * B
+            ) * bytes_per_activation
+        else:
+            out["attention/qk_matmul"] = TBH * 2 * bytes_per_activation
+            out["attention/softmax"] = (
+                self.n_head * self.n_ctx**2 * B * bytes_per_activation
+            )
+            out["attention/attention_over_v"] = (
+                TBH + self.n_head * self.n_ctx**2 * B
+            ) * bytes_per_activation
+        out["attention/proj"] = TBH * bytes_per_activation
+        out["attention"] = (
+            out["attention/ln"]
+            + out["attention/kqv"]
+            + out["attention/qk_matmul"]
+            + out["attention/softmax"]
+            + out["attention/attention_over_v"]
+            + out["attention/proj"]
+        )
+
+        # MLP blocks
+        out["mlp/ln"] = TBH * bytes_per_activation
+        out["mlp/ffw"] = TBH * bytes_per_activation
+        out["mlp/ffw_activation"] = self.n_ctx * B * self.d_mlp * bytes_per_activation
+        out["mlp/proj"] = self.n_ctx * B * self.d_mlp * bytes_per_activation
+        out["mlp"] = (
+            out["mlp/ln"] + out["mlp/ffw"] + out["mlp/ffw_activation"] + out["mlp/proj"]
+        )
+
+        # the transformer and the rest of it
+        out["block"] = out["attention"] + out["mlp"]
+        out["transformer"] = self.n_layer * out["block"]
+
+        # final layernorm and output projection
+        out["ln_f"] = TBH * bytes_per_activation
+        out["out_embedding"] = TBH * bytes_per_activation
+
+        # total
+        out["total"] = (
+            out["embedding"] + out["transformer"] + out["ln_f"] + out["out_embedding"]
+        )
+        return ModelActivations(total=out["total"], per_component=out)
+
+    def compute_flops(self) -> ModelFlops:
+        # we only count Weight FLOPs,
+        # FLOPS for all other layers (LayerNorm, Softmax, etc) and bias vector additian are effectively irrelevant
+        # we count actual FLOPs, not MACs. Hence 2* all over the place
+        # basically for any matrix multiply A (BxC) @ B (CxD) -> (BxD) flops are 2*B*C*D
+
+        out = OrderedDict()
+        head_size = self.d_model // self.n_head
+
+        # attention blocks
+        # 1) the projection to key, query, values
+        out["attention/kqv"] = 2 * self.n_ctx * (self.d_model * 3 * self.d_model)
+        # 2) calculating the attention scores
+        out["attention/scores"] = 2 * self.n_ctx * self.n_ctx * self.d_model
+        # 3) the reduction of the values (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
+        out["attention/reduce"] = (
+            2 * self.n_head * (self.n_ctx * self.n_ctx * head_size)
+        )
+        # 4) the final linear projection
+        out["attention/proj"] = 2 * self.n_ctx * (self.d_model * self.d_model)
+        out["attention"] = sum(
+            out["attention/" + k] for k in ["kqv", "scores", "reduce", "proj"]
+        )
+
+        # MLP blocks
+        out["mlp/ffw1"] = 2 * self.n_ctx * (self.d_model * self.d_mlp)
+        out["mlp/ffw2"] = 2 * self.n_ctx * (self.d_mlp * self.d_model)
+        out["mlp"] = out["mlp/ffw1"] + out["mlp/ffw2"]
+
+        # the transformer and the rest of it
+        out["block"] = out["attention"] + out["mlp"]
+        out["transformer"] = self.n_layer * out["block"]
+        out["out_embedding"] = 2 * self.n_ctx * (self.d_model * self.vocab_size)
+
+        # forward,backward,total
+        out["forward_total"] = out["transformer"] + out["out_embedding"]
+        out["backward_total"] = (
+            2 * out["forward_total"]
+        )  # use common estimate of bwd = 2*fwd
+        out["total"] = out["forward_total"] + out["backward_total"]
+
+        return ModelFlops(
+            total=out["total"],
+            forward_total=out["forward_total"],
+            backward_total=out["backward_total"],
+            per_component=out,
+        )
 
 
 # 124M params
