@@ -29,10 +29,10 @@ GPU_INFO = {
         name="H100",
         memory_bytes=GiB_to_bytes(80),
         fp32_flops=TFLOPS_to_FLOPS(67),
-        fp16_flops=TFLOPS_to_FLOPS(1979),
-        tf32_flops=TFLOPS_to_FLOPS(989),
-        bf16_flops=TFLOPS_to_FLOPS(1979),
-        int8_flops=TFLOPS_to_FLOPS(3958),
+        fp16_flops=TFLOPS_to_FLOPS(989),
+        tf32_flops=TFLOPS_to_FLOPS(494),
+        bf16_flops=TFLOPS_to_FLOPS(989),
+        int8_flops=TFLOPS_to_FLOPS(1979),
     ),
     # https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/nvidia-a100-datasheet-nvidia-us-2188504-web.pdf
     "A100": GPUInfo(
