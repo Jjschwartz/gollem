@@ -20,7 +20,7 @@ from gollem.utils import print0
 
 
 @dataclass
-class RunConfig:
+class GPT2RunConfig:
     # Model config to use if using pre-defined model configs
     # (choices:"gpt2", "gpt2-medium", "gpt2-large", "gpt2-xl")
     model_name: Union[str, None] = field(default=None)
@@ -35,7 +35,7 @@ class RunConfig:
 def main():
     try:
         print0("Parsing config")
-        cfg = pyrallis.parse(config_class=RunConfig)
+        cfg = pyrallis.parse(config_class=GPT2RunConfig)
     except Exception as e:
         print("Failed to parse config")
         print(e)

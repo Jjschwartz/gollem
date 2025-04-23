@@ -11,9 +11,9 @@ class TrainConfig:
     # Batch size per individual training forward pass in #sequences.
     batch_size: int = 4
     # Max sequence length in batch.
-    seq_len: int = 64
+    seq_len: int = 1024
     # Total desired batch size in #tokens per model update.
-    total_batch_size: int = 256
+    total_batch_size: int = 4096
     # Number of training iterations (i.e. batches of `total_batch_size`).
     num_iterations: int = 10
     # Every how many steps to evaluate val loss.

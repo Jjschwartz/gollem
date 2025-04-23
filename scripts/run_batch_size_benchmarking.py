@@ -2,16 +2,22 @@
 
 import csv
 import json
+import os
+import sys
 import time
 from dataclasses import asdict
+from dataclasses import dataclass
+from dataclasses import field
 from datetime import datetime
 from pathlib import Path
 from pprint import pprint
+from typing import Union
 
+import pyrallis
 import torch
 from gollem.data import load_dataset
-from gollem.models import get_model_config
-from gollem.models.config import ModelConfig
+from gollem.models.gpt2.config import GPT2Config
+from gollem.models.gpt2.config import get_gpt2_model_config
 from gollem.train.config import TrainConfig
 from gollem.train.core import run
 
@@ -31,11 +37,9 @@ BASE_TRAIN_CONFIG = TrainConfig(
 )
 
 
-def run_benchmark(
-    model_config: ModelConfig,
-    use_activation_checkpointing: bool = False,
-    debug: bool = False,
-):
+def run_benchmark(model_config: GPT2Config, train_config: TrainConfig):
+    debug = os.environ.get("GOLLEM_DEBUG", "0") == "1"
+
     results_dir = (
         THIS_DIR.parent
         / "results"
@@ -44,20 +48,14 @@ def run_benchmark(
     results_dir.mkdir(parents=True, exist_ok=True)
     time_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
-    if use_activation_checkpointing:
-        if not hasattr(model_config, "activation_checkpointing"):
-            raise ValueError(
-                f"Model {model_config.model_name} does not support activation checkpointing"
-            )
-        results_file_path = results_dir / f"results_{time_str}_ac.csv"
-        model_config.activation_checkpointing = use_activation_checkpointing  # type: ignore
-    else:
-        results_file_path = results_dir / f"results_{time_str}.csv"
-
+    results_file_path = results_dir / f"results_{time_str}.csv"
     # save model config
     if not debug:
         with open(results_file_path.with_suffix(".json"), "w") as f:
             json.dump(asdict(model_config), f)
+    else:
+        print("train config:")
+        pprint(asdict(train_config))
 
     # get max mem available
     if torch.cuda.is_available():
@@ -71,7 +69,7 @@ def run_benchmark(
         include_val_set=False,
     )
 
-    seq_len = BASE_TRAIN_CONFIG.seq_len
+    seq_len = train_config.seq_len
     # batch size = 2^batch_size_power * seq_len
     batch_size_power_range = [0, 12]
     total_num_runs = batch_size_power_range[1] - batch_size_power_range[0]
@@ -83,7 +81,7 @@ def run_benchmark(
         batch_size_tokens = batch_size_num_seqs * seq_len
         total_batch_size = batch_size_tokens
 
-        base_train_kwargs = asdict(BASE_TRAIN_CONFIG)
+        base_train_kwargs = asdict(train_config)
         base_train_kwargs.update(
             {
                 "batch_size": batch_size_num_seqs,
@@ -146,18 +144,54 @@ def run_benchmark(
                 break
 
 
+@dataclass
+class RunConfig:
+    # Model config to use if using pre-defined model configs
+    # (choices:"gpt2", "gpt2-medium", "gpt2-large", "gpt2-xl")
+    model_name: Union[str, None] = field(default=None)
+    # GPT2Config
+    model: GPT2Config = field(default_factory=GPT2Config)
+    # TrainConfig
+    train: TrainConfig = field(default_factory=TrainConfig)
+
+
+def main():
+    try:
+        print("Parsing config")
+        cfg = pyrallis.parse(config_class=RunConfig)
+    except Exception as e:
+        print("Failed to parse config")
+        print(e)
+        sys.exit(1)
+
+    if cfg.model_name is None:
+        model_cfg = cfg.model
+    else:
+        # Use the named model config and override any parameters that were explicitly
+        # set (these are the ones that are different from the default config values)
+        default_model_kwargs = asdict(GPT2Config())
+        model_cfg_kwargs = asdict(cfg.model)
+        changes = {}
+        for k, v in model_cfg_kwargs.items():
+            if default_model_kwargs[k] != v:
+                changes[k] = v
+        model_cfg = get_gpt2_model_config(cfg.model_name)
+        model_cfg = GPT2Config.override(model_cfg, **changes)
+
+    # Update the base train config with any changes supplied via the CLI
+    train_cfg = cfg.train
+    default_train_kwargs = asdict(TrainConfig())
+    train_cfg_kwargs = asdict(train_cfg)
+    changes = {}
+    for k, v in train_cfg_kwargs.items():
+        if default_train_kwargs[k] != v:
+            changes[k] = v
+    base_train_kwargs = asdict(BASE_TRAIN_CONFIG)
+    base_train_kwargs.update(changes)
+    train_cfg = TrainConfig(**base_train_kwargs)
+
+    run_benchmark(model_cfg, train_cfg)
+
+
 if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("model_name", type=str)
-    parser.add_argument("-a", "--use_activation_checkpointing", action="store_true")
-    parser.add_argument("--debug", action="store_true")
-    args = parser.parse_args()
-
-    model_config = get_model_config(args.model_name)
-    run_benchmark(
-        model_config,
-        args.use_activation_checkpointing,
-        args.debug,
-    )
+    main()
