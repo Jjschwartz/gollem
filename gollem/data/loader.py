@@ -17,7 +17,7 @@ def _peek_data_shard(filename: str) -> int:
         print0("ERROR: magic number mismatch in the data .bin file!")
         exit(1)
     assert header[1] == 1, "unsupported version"
-    ntok = header[2]  # number of tokens (claimed)
+    ntok = int(header[2])  # number of tokens (claimed)
     return ntok  # for now just return the number of tokens
 
 
