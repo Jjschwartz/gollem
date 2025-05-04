@@ -28,9 +28,15 @@
 # 2. You may also want to change `activation_checkpointing` to `True` in the model
 #    config depending on model size and GPU memory available
 
-echo "Running GPT2 124M model"
+N_GPU=1
+
+# Set the number of threads per GPU
+N_CPU=$(nproc)
+export OMP_NUM_THREADS=$(( $N_CPU / $N_GPU ))
+
+echo "Running GPT2 124M model with $N_GPU GPUs and $OMP_NUM_THREADS threads per GPU"
 # uv run python gollem/train_gpt2.py \
-uv run torchrun --standalone --nproc_per_node=8 gollem/train_gpt2.py \
+uv run torchrun --standalone --nproc_per_node=$N_GPU gollem/train_gpt2.py \
     --dataset fineweb_edu_10B \
     --model.model_name gpt2_124M \
     --model.n_ctx 1024 \
@@ -52,7 +58,7 @@ uv run torchrun --standalone --nproc_per_node=8 gollem/train_gpt2.py \
     --model.zero_optimizer True \
     --model.from_pretrained False \
     --model.activation_checkpointing False \
-    --train.output_dir results/gpt2_fineweb_edu_10B \
+    --train.output_dir "results/gpt2_124M_fineweb_edu_10B" \
     --train.seed 42 \
     --train.batch_size 64 \
     --train.seq_len 1024 \

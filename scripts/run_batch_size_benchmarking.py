@@ -34,6 +34,11 @@ BASE_TRAIN_CONFIG = TrainConfig(
     use_wandb=False,
     tensorcores=True,
     dtype="bfloat16",
+    val_loss_every=0,
+    val_max_steps=0,
+    sample_every=0,
+    save_every=0,
+    snapshot_every=0,
 )
 
 

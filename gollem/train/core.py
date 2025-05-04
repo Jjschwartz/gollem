@@ -261,6 +261,9 @@ def run(
                 "train_config": train_config_dict,
                 "model_config": asdict(model_config),
                 "dataset_config": asdict(dataset_config),
+                "world_size": ddp_world_size,
+                "num_interop_threads": torch.get_num_interop_threads(),
+                "num_threads": torch.get_num_threads(),
             }
         )
 
@@ -411,9 +414,9 @@ def run(
         # end of training section
 
         # wait on the CPU for all device work to end so we get accurate per-iteration timings below
-        if device == "mps":
+        if "mps" in device:
             torch.mps.synchronize()
-        elif device == "cuda":
+        elif "cuda" in device:
             torch.cuda.synchronize()
         # time and print
         t1 = time.monotonic()
