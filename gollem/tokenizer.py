@@ -26,6 +26,11 @@ class BaseTokenizer(abc.ABC):
         """Encode a string into a list of tokens IDs."""
         pass
 
+    # FIXME: this is not efficient, we should encode all texts at once
+    def encode_batch(self, texts: list[str], add_eot: bool = True) -> list[list[int]]:
+        """Encode a list of strings into a list of lists of tokens IDs."""
+        return [self.encode(text, add_eot) for text in texts]
+
     @abc.abstractmethod
     def decode(self, tokens: list[int]) -> str:
         """Decode a list of tokens IDs into a string."""
