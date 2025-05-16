@@ -48,7 +48,7 @@ class Llama3Config(ModelConfig):
     # MLP intermediate dimension
     intermediate_size: int = field(default=14336)
     # Vocabulary size
-    vocab_size: int = field(default=128000)
+    vocab_size: int = field(default=128256)
     # Learning rate
     learning_rate: float = field(default=3e-4)
     # Learning rate warmup iterations
@@ -89,7 +89,7 @@ class Llama3Config(ModelConfig):
         assert self.d_model % self.n_head == 0
 
     def get_tokenizer(self) -> BaseTokenizer:
-        return get_tokenizer("llama-3")
+        return get_tokenizer("llama3")
 
     def get_model_and_optimizer(
         self, device: str | torch.device

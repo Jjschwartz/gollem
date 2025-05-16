@@ -245,7 +245,7 @@ class TransformerBlock(nn.Module):
 
 
 class GPT(BaseLLM["GPT2Config"]):
-    """GPT-2 model."""
+    """GPT2 model."""
 
     def __init__(self, cfg: "GPT2Config"):
         super().__init__(cfg)

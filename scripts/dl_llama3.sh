@@ -13,7 +13,7 @@ mkdir -p checkpoints
 
 # Download the model
 if [ "$size" == "8B" ]; then
-    uv run huggingface-cli download meta-llama/Meta-Llama-3-8B --include "original/*" --local-dir checkpoints/Meta-Llama-3-8B
+    uv run huggingface-cli download meta-llama/Meta-Llama-3-8B --include "original/*" --local-dir checkpoints/llama3-8B
 fi
 
 

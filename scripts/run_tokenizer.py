@@ -35,8 +35,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "-m",
         "--model_desc",
-        default="gpt-2",
-        choices=["gpt-2", "llama-3"],
+        default="gpt2",
+        choices=["gpt2", "llama3"],
         help="Model type (determines the tokenizer)",
     )
     args = parser.parse_args()

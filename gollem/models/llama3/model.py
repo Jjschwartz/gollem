@@ -1,4 +1,4 @@
-"""Llama-3 implementation.
+"""Llama3 implementation.
 
 Based on: https://github.com/meta-llama/llama/blob/main/llama/model.py
 
@@ -9,6 +9,8 @@ Llama-3 model so we can easily load pretained weights
 import inspect
 import math
 import os
+import warnings
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import torch
@@ -18,6 +20,7 @@ from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.utils.checkpoint import checkpoint
 
 from gollem.models.model import BaseLLM
+from gollem.utils import get_base_dir_path
 from gollem.utils import print0
 
 
@@ -562,7 +565,7 @@ class Llama3(BaseLLM["Llama3Config"]):
                 lr=self.cfg.learning_rate,
                 betas=self.cfg.betas,
                 fused=use_fused,
-            )
+            )  # type: ignore
             optimizer.add_param_group(optim_groups[1])
         else:
             print0(f"Using regular AdamW with fused={use_fused}")
@@ -575,6 +578,48 @@ class Llama3(BaseLLM["Llama3Config"]):
         return optimizer
 
     @classmethod
-    def from_pretrained(cls, config: "Llama3Config") -> "Llama3":
+    def from_pretrained(cls, cfg: "Llama3Config") -> "Llama3":
         """Loads pretrained Llama-3 model weights from huggingface"""
-        raise NotImplementedError("Not implemented")
+        print(f"Loading weights from pretrained llama3 {cfg.model_name}")
+        checkpoint_dir = download_llama3_weights(cfg.model_name)
+        # NOTE: we do a manual copy to avoid problems with some nn.Module parameters
+        #  not existing in the checkpoint, specifically buffers like `attn.mask`
+        sd_hf = torch.load(checkpoint_dir / "original" / "consolidated.00.pth")  # type: ignore
+        print("Creating model and loading weights")
+        model = Llama3(cfg)
+        sd = model.state_dict()
+        # copy while ensuring all of the parameters are aligned and match in names and shapes
+        for k in sd_hf:
+            assert sd_hf[k].shape == sd[k].shape
+            with torch.no_grad():
+                sd[k].copy_(sd_hf[k])
+        return model
+
+
+def download_llama3_weights(model_name: str) -> Path:
+    """Download the weights for the given model name."""
+    print(f"Downloading weights for {model_name}")
+    checkpoint_dir = get_base_dir_path() / "checkpoints" / model_name
+    if checkpoint_dir.exists():
+        print(
+            f"Existing checkpoint found for {model_name} at {checkpoint_dir} skipping download"
+        )
+        return checkpoint_dir
+
+    from huggingface_hub import snapshot_download
+
+    hf_model_id_map = {
+        "llama3-8B": "meta-llama/Meta-Llama-3-8B",
+    }
+
+    download_dir = snapshot_download(
+        repo_id=hf_model_id_map[model_name],
+        repo_type="model",
+        local_dir=checkpoint_dir,
+    )
+    if download_dir != checkpoint_dir:
+        warnings.warn(
+            f"Downloaded weights for {model_name} to {download_dir}, but expected {checkpoint_dir}"
+        )
+
+    return Path(download_dir)

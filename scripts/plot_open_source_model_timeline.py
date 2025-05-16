@@ -141,7 +141,7 @@ model_infos = [
         organization="Google",
     ),
     # ModelInfo(
-    #     "GPT-2",
+    #     "GPT2",
     #     datetime(2019, 2, 14),
     #     [0.117, 0.345, 0.762, 1.5],
     #     model_type="dense",
