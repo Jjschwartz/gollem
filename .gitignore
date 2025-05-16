@@ -2,7 +2,7 @@ results/*
 launch_dev_env.sh
 gollem/data/datasets/*
 wandb/
-
+checkpoints/*
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
