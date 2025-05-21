@@ -48,13 +48,10 @@ class BaseLLM(nn.Module, Generic[ModelConfigT]):
         Most likely you'll want to make sure to be in model.eval() mode of operation
         for this.
         """
+        max_new_tokens = min(max_new_tokens, self.cfg.n_ctx - len(tokens))
+        tokens = tokens.view(1, -1)
         for _ in range(max_new_tokens):
-            # if the sequence context is growing too long we must crop it
-            ctx = (
-                tokens
-                if tokens.size(1) <= self.cfg.n_ctx
-                else tokens[:, -self.cfg.n_ctx :]
-            )
+            ctx = tokens
             # forward the model to get the logits for the index in the sequence
             logits, _ = self(ctx)
             # pluck the logits at the final step and scale by desired temperature
@@ -72,7 +69,7 @@ class BaseLLM(nn.Module, Generic[ModelConfigT]):
             if end_token is not None and next_token == end_token:
                 break
 
-        return tokens
+        return tokens.squeeze(0)
 
     def configure_optimizers(self, device_type: str) -> torch.optim.Optimizer:
         raise NotImplementedError()

@@ -298,11 +298,12 @@ class InferenceAttention(Attention):
         # compute and rescale attention scores using flash attention
         # handles default scaling of 1/sqrt(d_head)
         # z: (B, n_head, N, d_head)
-        z = F.scaled_dot_product_attention(xq, xk, xv, is_causal=False, attn_mask=mask)
+        z = F.scaled_dot_product_attention(
+            xq, xk, xv, is_causal=False, attn_mask=mask, enable_gqa=True
+        )
         # re-assemble all head outputs side-by-side
         # (B, n_head, N, d_head) -> (B, N, d_model)
         z = z.transpose(1, 2).contiguous().view(B, N, self.d_model)
-
         # project to output: (B, N, d_model) -> (B, N, d_model)
         return self.wo(z)
 
@@ -486,7 +487,7 @@ class Llama3(BaseLLM["Llama3Config"]):
 
         # generate embedding
         # shape (B, N, d_model)
-        h = self.tok_embeddings.wte(tokens)
+        h = self.tok_embeddings(tokens)
 
         # get RoPE freqs for the current sequence
         freqs_cis = self.freqs_cis[start_pos : start_pos + N]
@@ -518,10 +519,11 @@ class Llama3(BaseLLM["Llama3Config"]):
         self,
         prompt_tokens: list[torch.Tensor],
         max_new_tokens: int,
-        end_token: int | None = None,
+        stop_tokens: list[int] | torch.Tensor | None = None,
         temperature: float = 1.0,
         top_k: int | None = None,
-    ) -> torch.Tensor:
+        echo: bool = False,
+    ) -> list[torch.Tensor]:
         """Generate sequence.
 
         Takes a conditioning sequence of token indices idx (LongTensor of shape (b,t))
@@ -532,38 +534,42 @@ class Llama3(BaseLLM["Llama3Config"]):
         for this.
         """
         B = len(prompt_tokens)
-        assert B == 1, "Only batch size 1 is supported for now"
         assert self.cfg.max_sample_batch_size >= B
         if not self.cfg.inference_mode:
+            assert B == 1, "Only batch size 1 is supported for now"
             # fall back to less efficient base class implementation which uses the
             # forward pass without KV-caching
-            return super().generate(
-                prompt_tokens, max_new_tokens, end_token, temperature, top_k
-            )
+            return [
+                super().generate(
+                    prompt_tokens[0],
+                    max_new_tokens=max_new_tokens,
+                    end_token=int(stop_tokens[0]) if stop_tokens else None,
+                    temperature=temperature,
+                    top_k=top_k,
+                )
+            ]
+
+        device = prompt_tokens[0].device
 
         min_prompt_len = min(len(t) for t in prompt_tokens)
         max_prompt_len = max(len(t) for t in prompt_tokens)
-        assert max_prompt_len <= self.cfg.n_ctx
+        assert max_prompt_len < self.cfg.n_ctx
         max_total_len = min(self.cfg.n_ctx, max_prompt_len + max_new_tokens)
 
         # initialize token buffer with prompt tokens
-        tokens = torch.full(
-            (B, max_total_len),
-            self.tokenizer.pad_id,
-            dtype=torch.long,
-        )
+        pad_id = -1
+        tokens = torch.full((B, max_total_len), pad_id, dtype=torch.long, device=device)
         for k, t in enumerate(prompt_tokens):
-            tokens[k, : len(t)] = torch.tensor(t, dtype=torch.long)
+            tokens[k, : len(t)] = t
 
         # initially prev_pos=0 as we need to generate the prompt tokens to populate
         # the kv-cache properly
         prev_pos = 0
-        eos_reached = torch.tensor([False] * B)
-        input_tokens_mask = tokens != self.tokenizer.pad_id
-        if min_prompt_len == max_total_len:
-            logits = self.sample(tokens, prev_pos)
+        eos_reached = torch.tensor([False] * B, device=device)
+        input_tokens_mask = tokens != pad_id
 
-        # TODO handle case where min_prompt_len == max_total_len ??
+        if stop_tokens is not None:
+            stop_tokens = torch.tensor(stop_tokens, device=device)
 
         for cur_pos in range(min_prompt_len, max_total_len):
             # forward the model to get the logits for the index in the sequence
@@ -579,124 +585,147 @@ class Llama3(BaseLLM["Llama3Config"]):
             # sample from the distribution
             next_token = torch.multinomial(probs, num_samples=1)
             # only replace token if prompt has already been generated
+            next_token = next_token.reshape(-1)
             next_token = torch.where(
                 input_tokens_mask[:, cur_pos], tokens[:, cur_pos], next_token
             )
-            # append sampled index to the running sequence and continue
-            tokens = torch.cat((tokens, next_token), dim=1)
-            if end_token is not None and next_token == end_token:
-                break
 
-        return tokens
-
-    @torch.inference_mode()
-    def generate(
-        self,
-        prompt_tokens: List[List[int]],
-        max_gen_len: int,
-        temperature: float = 0.6,
-        top_p: float = 0.9,
-        logprobs: bool = False,
-        echo: bool = False,
-    ) -> Tuple[List[List[int]], Optional[List[List[float]]]]:
-        """
-        Generate text sequences based on provided prompts using the language generation model.
-
-        Args:
-            prompt_tokens (List[List[int]]): List of tokenized prompts, where each prompt is represented as a list of integers.
-            max_gen_len (int): Maximum length of the generated text sequence.
-            temperature (float, optional): Temperature value for controlling randomness in sampling. Defaults to 0.6.
-            top_p (float, optional): Top-p probability threshold for nucleus sampling. Defaults to 0.9.
-            logprobs (bool, optional): Flag indicating whether to compute token log probabilities. Defaults to False.
-            echo (bool, optional): Flag indicating whether to include prompt tokens in the generated output. Defaults to False.
-
-        Returns:
-            Tuple[List[List[int]], Optional[List[List[float]]]]: A tuple containing generated token sequences and, if logprobs is True, corresponding token log probabilities.
-
-        Note:
-            This method uses the provided prompts as a basis for generating text. It employs nucleus sampling to produce text with controlled randomness.
-            If logprobs is True, token log probabilities are computed for each generated token.
-
-        """
-        params = self.model.params
-        bsz = len(prompt_tokens)
-        assert bsz <= params.max_batch_size, (bsz, params.max_batch_size)
-
-        min_prompt_len = min(len(t) for t in prompt_tokens)
-        max_prompt_len = max(len(t) for t in prompt_tokens)
-        assert max_prompt_len <= params.max_seq_len
-        total_len = min(params.max_seq_len, max_gen_len + max_prompt_len)
-
-        pad_id = self.tokenizer.pad_id
-        tokens = torch.full((bsz, total_len), pad_id, dtype=torch.long, device="cuda")
-        for k, t in enumerate(prompt_tokens):
-            tokens[k, : len(t)] = torch.tensor(t, dtype=torch.long, device="cuda")
-        if logprobs:
-            token_logprobs = torch.zeros_like(tokens, dtype=torch.float)
-
-        prev_pos = 0
-        eos_reached = torch.tensor([False] * bsz, device="cuda")
-        input_text_mask = tokens != pad_id
-        if min_prompt_len == total_len:
-            logits = self.model.forward(tokens, prev_pos)
-            token_logprobs = -F.cross_entropy(
-                input=logits.transpose(1, 2),
-                target=tokens,
-                reduction="none",
-                ignore_index=pad_id,
-            )
-
-        stop_tokens = torch.tensor(list(self.tokenizer.stop_tokens))
-
-        for cur_pos in range(min_prompt_len, total_len):
-            logits = self.model.forward(tokens[:, prev_pos:cur_pos], prev_pos)
-            if temperature > 0:
-                probs = torch.softmax(logits[:, -1] / temperature, dim=-1)
-                next_token = sample_top_p(probs, top_p)
-            else:
-                next_token = torch.argmax(logits[:, -1], dim=-1)
-
-            next_token = next_token.reshape(-1)
-            # only replace token if prompt has already been generated
-            next_token = torch.where(
-                input_text_mask[:, cur_pos], tokens[:, cur_pos], next_token
-            )
             tokens[:, cur_pos] = next_token
-            if logprobs:
-                token_logprobs[:, prev_pos + 1 : cur_pos + 1] = -F.cross_entropy(
-                    input=logits.transpose(1, 2),
-                    target=tokens[:, prev_pos + 1 : cur_pos + 1],
-                    reduction="none",
-                    ignore_index=pad_id,
+            if stop_tokens is not None:
+                eos_reached |= (~input_tokens_mask[:, cur_pos]) & (
+                    torch.isin(next_token, stop_tokens)
                 )
-            eos_reached |= (~input_text_mask[:, cur_pos]) & (
-                torch.isin(next_token, stop_tokens)
-            )
             prev_pos = cur_pos
             if all(eos_reached):
                 break
 
-        if logprobs:
-            token_logprobs = token_logprobs.tolist()
-        out_tokens, out_logprobs = [], []
-        for i, toks in enumerate(tokens.tolist()):
-            # cut to max gen len
+        # truncate each sequence in batch to the first eos token
+        out_tokens = []
+        for i in range(B):
+            seq_tokens = tokens[i]
             start = 0 if echo else len(prompt_tokens[i])
-            toks = toks[start : len(prompt_tokens[i]) + max_gen_len]
-            probs = None
-            if logprobs:
-                probs = token_logprobs[i][start : len(prompt_tokens[i]) + max_gen_len]
-            # cut to after eos tok if any
-            for stop_token in self.tokenizer.stop_tokens:
-                try:
-                    eos_idx = toks.index(stop_token)
-                    toks = toks[:eos_idx]
-                    probs = probs[:eos_idx] if logprobs else None
-                except ValueError:
-                    pass
-            out_tokens.append(toks)
-            out_logprobs.append(probs)
-        return (out_tokens, out_logprobs if logprobs else None)
+            seq_tokens = seq_tokens[start : len(prompt_tokens[i]) + max_new_tokens]
+            if stop_tokens is not None:
+                for stop_token in stop_tokens:
+                    eos_idx = torch.where(seq_tokens == stop_token)[0]
+                    if len(eos_idx) > 0:
+                        seq_tokens = seq_tokens[: eos_idx[0]]
+                        break
+            out_tokens.append(seq_tokens)
+
+        return out_tokens
+
+    # @torch.inference_mode()
+    # def generate(
+    #     self,
+    #     prompt_tokens: list[list[int]],
+    #     max_gen_len: int,
+    #     temperature: float = 0.6,
+    #     top_p: float = 0.9,
+    #     logprobs: bool = False,
+    #     echo: bool = False,
+    # ) -> tuple[list[list[int]], list[list[float]] | None]:
+    #     """Generate text sequences.
+
+    #     Args:
+    #         prompt_tokens : List of tokenized prompts, where each prompt is represented
+    #             as a list of integers.
+    #         max_gen_len : Maximum length of the generated text sequence.
+    #         temperature : Temperature value for controlling randomness in sampling.
+    #         top_p : Top-p probability threshold for nucleus sampling.
+    #         logprobs : Flag indicating whether to compute token log probabilities.
+    #         echo : Flag indicating whether to include prompt tokens in the generated output.
+
+    #     Returns:
+    #         A tuple containing generated token sequences and, if logprobs is True,
+    #         corresponding token log probabilities.
+
+    #     Note:
+    #         This method uses the provided prompts as a basis for generating text. It
+    #         employs nucleus sampling to produce text with controlled randomness.
+    #         If logprobs is True, token log probabilities are computed for each generated
+    #         token.
+
+    #     """
+    #     params = self.model.params
+    #     bsz = len(prompt_tokens)
+    #     assert bsz <= params.max_batch_size, (bsz, params.max_batch_size)
+
+    #     min_prompt_len = min(len(t) for t in prompt_tokens)
+    #     max_prompt_len = max(len(t) for t in prompt_tokens)
+    #     assert max_prompt_len <= params.max_seq_len
+    #     total_len = min(params.max_seq_len, max_gen_len + max_prompt_len)
+
+    #     pad_id = self.tokenizer.pad_id
+    #     tokens = torch.full((bsz, total_len), pad_id, dtype=torch.long, device="cuda")
+    #     for k, t in enumerate(prompt_tokens):
+    #         tokens[k, : len(t)] = torch.tensor(t, dtype=torch.long, device="cuda")
+    #     if logprobs:
+    #         token_logprobs = torch.zeros_like(tokens, dtype=torch.float)
+
+    #     prev_pos = 0
+    #     eos_reached = torch.tensor([False] * bsz, device="cuda")
+    #     input_text_mask = tokens != pad_id
+    #     if min_prompt_len == total_len:
+    #         logits = self.model.forward(tokens, prev_pos)
+    #         token_logprobs = -F.cross_entropy(
+    #             input=logits.transpose(1, 2),
+    #             target=tokens,
+    #             reduction="none",
+    #             ignore_index=pad_id,
+    #         )
+
+    #     stop_tokens = torch.tensor(list(self.tokenizer.stop_tokens))
+
+    #     for cur_pos in range(min_prompt_len, total_len):
+    #         logits = self.model.forward(tokens[:, prev_pos:cur_pos], prev_pos)
+    #         if temperature > 0:
+    #             probs = torch.softmax(logits[:, -1] / temperature, dim=-1)
+    #             next_token = sample_top_p(probs, top_p)
+    #         else:
+    #             next_token = torch.argmax(logits[:, -1], dim=-1)
+
+    #         next_token = next_token.reshape(-1)
+    #         # only replace token if prompt has already been generated
+    #         next_token = torch.where(
+    #             input_text_mask[:, cur_pos], tokens[:, cur_pos], next_token
+    #         )
+    #         tokens[:, cur_pos] = next_token
+    #         if logprobs:
+    #             token_logprobs[:, prev_pos + 1 : cur_pos + 1] = -F.cross_entropy(
+    #                 input=logits.transpose(1, 2),
+    #                 target=tokens[:, prev_pos + 1 : cur_pos + 1],
+    #                 reduction="none",
+    #                 ignore_index=pad_id,
+    #             )
+    #         eos_reached |= (~input_text_mask[:, cur_pos]) & (
+    #             torch.isin(next_token, stop_tokens)
+    #         )
+    #         prev_pos = cur_pos
+    #         if all(eos_reached):
+    #             break
+
+    #     if logprobs:
+    #         token_logprobs = token_logprobs.tolist()
+    #     out_tokens, out_logprobs = [], []
+    #     for i, toks in enumerate(tokens.tolist()):
+    #         # cut to max gen len
+    #         start = 0 if echo else len(prompt_tokens[i])
+    #         toks = toks[start : len(prompt_tokens[i]) + max_gen_len]
+    #         probs = None
+    #         if logprobs:
+    #             probs = token_logprobs[i][start : len(prompt_tokens[i]) + max_gen_len]
+    #         # cut to after eos tok if any
+    #         for stop_token in self.tokenizer.stop_tokens:
+    #             try:
+    #                 eos_idx = toks.index(stop_token)
+    #                 toks = toks[:eos_idx]
+    #                 probs = probs[:eos_idx] if logprobs else None
+    #             except ValueError:
+    #                 pass
+    #         out_tokens.append(toks)
+    #         out_logprobs.append(probs)
+    #     return (out_tokens, out_logprobs if logprobs else None)
 
     def configure_optimizers(self, device_type: str) -> torch.optim.Optimizer:
         # start with all of the candidate parameters
