@@ -21,7 +21,7 @@ class RunConfig:
     # Name of the dataset to use (see `gollem.data.__init__.py`)
     dataset: str = field(default="tinyshakespeare")
     # Llama3Config
-    model: str = field(default="llama3-33M")
+    model: str = field(default="llama-3.1-33M")
     # Training configuration
     train: TrainConfig = field(default_factory=TrainConfig)
 

@@ -148,7 +148,7 @@ if __name__ == "__main__":
         "--model_desc",
         type=str,
         default="gpt2",
-        choices=["gpt2", "llama3"],
+        choices=["gpt2", "llama-3"],
         help="Model type (determines the tokenizer)",
     )
     args = parser.parse_args()

@@ -50,7 +50,7 @@ def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
     # t: (end,)
     t = torch.arange(end)
     # freqs: (end, dim // 2)
-    freqs = torch.outer(t, freqs).float()
+    freqs = torch.outer(t, freqs).float()  # type: ignore
     # freqs_cis: (end, dim // 2)
     # convert the freqs (i.e. angles) into polar coordinates represented as complex numbers
     # the distance of each point is 1, and the angle is the frequency
@@ -157,38 +157,6 @@ class Attention(nn.Module):
         # sets flag for init weight scaling
         self.wo.LLMC_RESIDUAL_SCALE_FLAG = 1  # type: ignore
 
-        # constant used for the attention masking
-        self.register_buffer(
-            "mask",
-            torch.triu(torch.full((cfg.n_ctx, cfg.n_ctx), float("-inf"))).view(
-                1, 1, cfg.n_ctx, cfg.n_ctx
-            ),
-        )
-
-        # Caches for inference
-        # if cfg.use_kv_caching:
-        #     # KV cache
-        #     self.register_buffer(
-        #         "cache_k",
-        #         torch.zeros(
-        #             (cfg.max_sample_batch_size, cfg.n_kv_head, cfg.n_ctx, self.d_head)
-        #         ),
-        #     )
-        #     self.register_buffer(
-        #         "cache_v",
-        #         torch.zeros(
-        #             (cfg.max_sample_batch_size, cfg.n_kv_head, cfg.n_ctx, self.d_head)
-        #         ),
-        #     )
-        #     self.cache_x = None
-        # else:
-        #     self.register_buffer(
-        #         "cache_x",
-        #         torch.zeros((cfg.max_sample_batch_size, cfg.n_ctx, self.d_model)),
-        #     )
-        #     self.cache_k = None
-        #     self.cache_v = None
-
     def forward(
         self,
         x: torch.Tensor,
@@ -242,97 +210,101 @@ class Attention(nn.Module):
         out = self.wo(z)
         return out
 
-    @torch.inference_mode()
-    def sample(self, x: torch.Tensor, start_pos: int) -> torch.Tensor:
-        raise NotImplementedError("Not implemented")
-        # TODO implement this
+    def sample(
+        self,
+        x: torch.Tensor,
+        start_pos: int,
+        freqs_cis: torch.Tensor,
+        mask: torch.Tensor,
+    ) -> torch.Tensor:
+        raise NotImplementedError("Attention.sample not implemented")
+
+
+class InferenceAttention(Attention):
+    """Multi-head causal attention for inference.
+
+    Includes KV-caching for faster inference.
+    Note: we keep this as a separate class so we are note wasting
+    """
+
+    def __init__(self, cfg: "Llama3Config"):
+        super().__init__(cfg)
+        self.register_buffer(
+            "cache_k",
+            torch.zeros(
+                (cfg.max_sample_batch_size, cfg.n_kv_head, cfg.n_ctx, self.d_head)
+            ),
+            persistent=False,
+        )
+        self.register_buffer(
+            "cache_v",
+            torch.zeros(
+                (cfg.max_sample_batch_size, cfg.n_kv_head, cfg.n_ctx, self.d_head)
+            ),
+            persistent=False,
+        )
+
+    def sample(
+        self,
+        x: torch.Tensor,
+        start_pos: int,
+        freqs_cis: torch.Tensor,
+        mask: torch.Tensor,
+    ) -> torch.Tensor:
         # input is the normalized residual from the previous layer
         # x: (batch, N, d_model)
         #   - where N is the number of new tokens since last sample, not
         #     the total sequence length T
         # start_pos: int, position 0 <= p <= n_ctx of start of x in the context
-        # B, N, _ = x.size()
-        # T = start_pos + N  # total sequence length
-        # assert (
-        #     self.cfg.n_ctx >= T
-        # ), f"Cannot sample beyond context length: {T} > {self.cfg.n_ctx}"
+        B, N, _ = x.size()
+        T = start_pos + N  # total sequence length
+        assert (
+            self.cfg.n_ctx >= T
+        ), f"Cannot sample beyond context length: {T} > {self.cfg.n_ctx}"
+        # mask: (1, 1, N, T)
+        assert mask.shape == (1, 1, N, T)
 
-        # if not self.cfg.use_kv_caching:
-        #     assert (
-        #         self.cache_x is not None
-        #     ), "Cache is not None but use_kv_caching is False"
-        #     self.cache_x[:B, start_pos:T] = x
-        #     # x: (B, T, d_model)
-        #     x = self.cache_x[:B, :T]
-        #     # compute query, key, value for all heads for new positions
-        #     # (B, N, d_model) -> (B, N, 3 * d_model)
-        #     qkv = self.c_attn(x)
-        #     # (B, N, 3 * d_model) -> (B, N, d_model), (B, N, d_model), (B, N, d_model)
-        #     q, k, v = qkv.split(self.d_model, dim=2)
-        #     # reshape each so heads are in separate dimensions and swap axes
-        #     # (B, N, d_model) -> (B, n_head, N, d_head)
-        #     k = k.view(B, T, self.n_head, self.d_head).transpose(1, 2)
-        #     q = q.view(B, T, self.n_head, self.d_head).transpose(1, 2)
-        #     v = v.view(B, T, self.n_head, self.d_head).transpose(1, 2)
-        #     # small optimization, we only need the last N positions of Q,
-        #     # since we are sampling the next token
-        #     q = q[:, :, start_pos:T, :]
+        # compute query, key, value for all heads
+        # (B, N, d_model) -> (B, N, d_model)
+        xq = self.wq(x)
+        # (B, N, d_model) -> (B, N, n_kv_head * d_head)
+        xk = self.wk(x)
+        xv = self.wv(x)
 
-        # if self.cfg.use_kv_caching:
-        #     assert (
-        #         self.cache_k is not None
-        #     ), "Cache is not None but use_kv_caching is True"
-        #     assert (
-        #         self.cache_v is not None
-        #     ), "Cache is not None but use_kv_caching is True"
-        #     # compute query, key, value for all heads for new positions
-        #     # (B, N, d_model) -> (B, N, 3 * d_model)
-        #     qkv = self.c_attn(x)
-        #     # (B, N, 3 * d_model) -> (B, N, d_model), (B, N, d_model), (B, N, d_model)
-        #     q, k, v = qkv.split(self.d_model, dim=2)
+        # reshape each so heads are in separate dimensions and swap axes
+        # xq: (B, N, d_model) -> (B, N, n_head, d_head)
+        xq = xq.view(B, N, self.n_head, self.d_head)
+        # x{k,v}: (B, N, d_model) -> (B, N, n_kv_head, d_head)
+        xk = xk.view(B, N, self.n_kv_head, self.d_head)
+        xv = xv.view(B, N, self.n_kv_head, self.d_head)
 
-        #     # reshape each so heads are in separate dimensions and swap axes
-        #     # (B, N, d_model) -> (B, n_head, N, d_head)
-        #     k = k.view(B, N, self.n_head, self.d_head).transpose(1, 2)
-        #     q = q.view(B, N, self.n_head, self.d_head).transpose(1, 2)
-        #     v = v.view(B, N, self.n_head, self.d_head).transpose(1, 2)
-        #     # update cache with KV values for new positions
-        #     self.cache_k[:B, :, start_pos:T] = k
-        #     self.cache_v[:B, :, start_pos:T] = v
-        #     # get cached K, V values for all positions up the current position
-        #     # (B, n_head, T, d_head)
-        #     k = self.cache_k[:B, :, :T]
-        #     v = self.cache_v[:B, :, :T]
+        xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
 
-        # # truncate mask for the current sequence positions
-        # # mask: (1, 1, N, T)
-        # mask = self.mask[:, :, start_pos:T, :T]
+        # Swap n_head and T axes
+        # xq: (B, N, nhead, d_head) -> (B, n_head, N, d_head)
+        xq = xq.transpose(1, 2)
+        # x{k,v}: (B, N, n_kv_head, d_head) -> (B, n_kv_head, N, d_head)
+        xk = xk.transpose(1, 2)
+        xv = xv.transpose(1, 2)
 
-        # # compute and rescale attention scores
-        # if self.cfg.flash:
-        #     # flash attention
-        #     # handles default scaling of 1/sqrt(d_head)
-        #     # z: (B, n_head, N, d_head)
-        #     z = F.scaled_dot_product_attention(q, k, v, is_causal=False, attn_mask=mask)
-        # else:
-        #     # attn_scores: (B, n_head, N, T)
-        #     attn_scores = q @ k.transpose(-2, -1)
-        #     # rescale
-        #     attn_scores = attn_scores / math.sqrt(self.d_head)
-        #     # apply causal mask
-        #     attn_scores = attn_scores + mask
-        #     # softmax to generate attn patterns
-        #     attn = attn_scores.softmax(dim=-1)
-        #     # (B, n_head, N, T) @ (B, n_head, T, d_head) -> (B, n_head, N, d_head)
-        #     z = attn @ v
+        # update cache with KV values for new positions
+        self.cache_k[:B, :, start_pos:T] = xk
+        self.cache_v[:B, :, start_pos:T] = xv
+        # get cached K, V values for all positions up the current position
+        # (B, n_kv_head, T, d_head)
+        xk = self.cache_k[:B, :, :T]
+        xv = self.cache_v[:B, :, :T]
 
-        # # re-assemble all head outputs side-by-side
-        # # (B, n_head, N, d_head) -> (B, N, d_model)
-        # z = z.transpose(1, 2).contiguous().view(B, N, self.d_model)
+        # compute and rescale attention scores using flash attention
+        # handles default scaling of 1/sqrt(d_head)
+        # z: (B, n_head, N, d_head)
+        z = F.scaled_dot_product_attention(xq, xk, xv, is_causal=False, attn_mask=mask)
+        # re-assemble all head outputs side-by-side
+        # (B, n_head, N, d_head) -> (B, N, d_model)
+        z = z.transpose(1, 2).contiguous().view(B, N, self.d_model)
 
-        # # project to output: (B, N, d_model) -> (batch, N, d_model)
-        # out = self.c_proj(z)
-        # return out
+        # project to output: (B, N, d_model) -> (B, N, d_model)
+        return self.wo(z)
 
 
 class MLP(nn.Module):
@@ -385,7 +357,10 @@ class TransformerBlock(nn.Module):
         self.d_head = cfg.d_model // cfg.n_head
 
         self.attention_norm = RMSNorm(cfg)
-        self.attention = Attention(cfg)
+        if cfg.inference_mode:
+            self.attention = InferenceAttention(cfg)
+        else:
+            self.attention = Attention(cfg)
         self.ffn_norm = RMSNorm(cfg)
         self.feed_forward = MLP(cfg)
 
@@ -394,11 +369,18 @@ class TransformerBlock(nn.Module):
         x = x + self.feed_forward(self.ffn_norm(x))
         return x
 
-    def sample(self, x: torch.Tensor, start_pos: int) -> torch.Tensor:
-        raise NotImplementedError("Not implemented")
-        # x = x + self.attention.sample(self.attention_norm(x), start_pos)
-        # x = x + self.feed_forward(self.ffn_norm(x))
-        # return x
+    def sample(
+        self,
+        x: torch.Tensor,
+        start_pos: int,
+        freqs_cis: torch.Tensor,
+        mask: torch.Tensor,
+    ) -> torch.Tensor:
+        x = x + self.attention.sample(
+            self.attention_norm(x), start_pos, freqs_cis, mask
+        )
+        x = x + self.feed_forward(self.ffn_norm(x))
+        return x
 
 
 class Llama3(BaseLLM["Llama3Config"]):
@@ -495,36 +477,226 @@ class Llama3(BaseLLM["Llama3Config"]):
         start_pos: int,
     ) -> torch.Tensor:
         """Sample from the model."""
-        raise NotImplementedError("Not implemented")
-        # device = tokens.device
-        # _, N = tokens.size()
-        # T = start_pos + N
-        # assert (
-        #     self.cfg.n_ctx >= T
-        # ), f"Cannot sample sequence of length {T}, ctx size is only {self.cfg.n_ctx}"
+        device = tokens.device
+        B, N = tokens.size()
+        T = start_pos + N
+        assert (
+            self.cfg.n_ctx >= T
+        ), f"Cannot sample sequence of length {T}, ctx size is only {self.cfg.n_ctx}"
 
-        # # generate embedding
-        # # token embeddings of shape (B, N, d_model)
-        # tok_emb = self.transformer.wte(tokens)
-        # # position embeddings of shape (N, d_model)
-        # pos = torch.arange(start_pos, T, dtype=torch.long, device=device)
-        # pos_emb = self.transformer.wpe(pos)
-        # # combine: (B, N, d_model)
-        # x = tok_emb + pos_emb
+        # generate embedding
+        # shape (B, N, d_model)
+        h = self.tok_embeddings.wte(tokens)
 
-        # # forward thru blocks: x = (B, N, d_model)
-        # for block in self.transformer.h:
-        #     if self.cfg.activation_checkpointing:
-        #         x = checkpoint(block.sample, x, start_pos, use_reentrant=False)
-        #     else:
-        #         x = block.sample(x, start_pos)
-        # x = self.transformer.ln_f(x)
+        # get RoPE freqs for the current sequence
+        freqs_cis = self.freqs_cis[start_pos : start_pos + N]
 
-        # # inference-time mini-optimization: only forward unembed on final position
-        # # note: using list [-1] to preserve the time dim
-        # logits = self.lm_head(x[:, [-1], :])
+        # To save memory we compute the mask only once and reuse it for all layers
+        # We also only generate the mask for the new sequence since when performing
+        # KV-caching, the matrix of attention scores we need to mask for the new
+        # sequence is of size (N, T), with only masked entries (i, j) for
+        # j > start_pos + i, since row i corresponds to token start_pos + i.
+        # Mask shape: (N, N)
+        mask = torch.triu(torch.full((N, N), float("-inf"), device=device), diagonal=1)
+        # Mask shape: (N, T)
+        mask = torch.hstack([torch.zeros((N, start_pos), device=device), mask]).type_as(
+            h
+        )
+        # Make it broadcastable to (B, n_heads, N, T) for flash attention
+        mask = mask.view(1, 1, N, T)
 
-        # return logits
+        # forward thru blocks: x = (B, N, d_model)
+        for layer in self.layers:
+            h = layer.sample(h, start_pos, freqs_cis, mask)
+        h = self.norm(h)
+        # (B, N, d_model) -> (B, N, vocab_size)
+        logits = self.output(h)
+        return logits
+
+    @torch.inference_mode()
+    def generate(
+        self,
+        prompt_tokens: list[torch.Tensor],
+        max_new_tokens: int,
+        end_token: int | None = None,
+        temperature: float = 1.0,
+        top_k: int | None = None,
+    ) -> torch.Tensor:
+        """Generate sequence.
+
+        Takes a conditioning sequence of token indices idx (LongTensor of shape (b,t))
+        and completes the sequence max_new_tokens times, feeding the predictions back
+        into the model each time.
+
+        Most likely you'll want to make sure to be in model.eval() mode of operation
+        for this.
+        """
+        B = len(prompt_tokens)
+        assert B == 1, "Only batch size 1 is supported for now"
+        assert self.cfg.max_sample_batch_size >= B
+        if not self.cfg.inference_mode:
+            # fall back to less efficient base class implementation which uses the
+            # forward pass without KV-caching
+            return super().generate(
+                prompt_tokens, max_new_tokens, end_token, temperature, top_k
+            )
+
+        min_prompt_len = min(len(t) for t in prompt_tokens)
+        max_prompt_len = max(len(t) for t in prompt_tokens)
+        assert max_prompt_len <= self.cfg.n_ctx
+        max_total_len = min(self.cfg.n_ctx, max_prompt_len + max_new_tokens)
+
+        # initialize token buffer with prompt tokens
+        tokens = torch.full(
+            (B, max_total_len),
+            self.tokenizer.pad_id,
+            dtype=torch.long,
+        )
+        for k, t in enumerate(prompt_tokens):
+            tokens[k, : len(t)] = torch.tensor(t, dtype=torch.long)
+
+        # initially prev_pos=0 as we need to generate the prompt tokens to populate
+        # the kv-cache properly
+        prev_pos = 0
+        eos_reached = torch.tensor([False] * B)
+        input_tokens_mask = tokens != self.tokenizer.pad_id
+        if min_prompt_len == max_total_len:
+            logits = self.sample(tokens, prev_pos)
+
+        # TODO handle case where min_prompt_len == max_total_len ??
+
+        for cur_pos in range(min_prompt_len, max_total_len):
+            # forward the model to get the logits for the index in the sequence
+            logits = self.sample(tokens[:, prev_pos:cur_pos], prev_pos)
+            # pluck the logits at the final step and scale by desired temperature
+            logits = logits[:, -1, :] / temperature
+            # optionally crop the logits to only the top k options
+            if top_k is not None:
+                v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
+                logits[logits < v[:, [-1]]] = -float("Inf")
+            # apply softmax to convert logits to (normalized) probabilities
+            probs = F.softmax(logits, dim=-1)
+            # sample from the distribution
+            next_token = torch.multinomial(probs, num_samples=1)
+            # only replace token if prompt has already been generated
+            next_token = torch.where(
+                input_tokens_mask[:, cur_pos], tokens[:, cur_pos], next_token
+            )
+            # append sampled index to the running sequence and continue
+            tokens = torch.cat((tokens, next_token), dim=1)
+            if end_token is not None and next_token == end_token:
+                break
+
+        return tokens
+
+    @torch.inference_mode()
+    def generate(
+        self,
+        prompt_tokens: List[List[int]],
+        max_gen_len: int,
+        temperature: float = 0.6,
+        top_p: float = 0.9,
+        logprobs: bool = False,
+        echo: bool = False,
+    ) -> Tuple[List[List[int]], Optional[List[List[float]]]]:
+        """
+        Generate text sequences based on provided prompts using the language generation model.
+
+        Args:
+            prompt_tokens (List[List[int]]): List of tokenized prompts, where each prompt is represented as a list of integers.
+            max_gen_len (int): Maximum length of the generated text sequence.
+            temperature (float, optional): Temperature value for controlling randomness in sampling. Defaults to 0.6.
+            top_p (float, optional): Top-p probability threshold for nucleus sampling. Defaults to 0.9.
+            logprobs (bool, optional): Flag indicating whether to compute token log probabilities. Defaults to False.
+            echo (bool, optional): Flag indicating whether to include prompt tokens in the generated output. Defaults to False.
+
+        Returns:
+            Tuple[List[List[int]], Optional[List[List[float]]]]: A tuple containing generated token sequences and, if logprobs is True, corresponding token log probabilities.
+
+        Note:
+            This method uses the provided prompts as a basis for generating text. It employs nucleus sampling to produce text with controlled randomness.
+            If logprobs is True, token log probabilities are computed for each generated token.
+
+        """
+        params = self.model.params
+        bsz = len(prompt_tokens)
+        assert bsz <= params.max_batch_size, (bsz, params.max_batch_size)
+
+        min_prompt_len = min(len(t) for t in prompt_tokens)
+        max_prompt_len = max(len(t) for t in prompt_tokens)
+        assert max_prompt_len <= params.max_seq_len
+        total_len = min(params.max_seq_len, max_gen_len + max_prompt_len)
+
+        pad_id = self.tokenizer.pad_id
+        tokens = torch.full((bsz, total_len), pad_id, dtype=torch.long, device="cuda")
+        for k, t in enumerate(prompt_tokens):
+            tokens[k, : len(t)] = torch.tensor(t, dtype=torch.long, device="cuda")
+        if logprobs:
+            token_logprobs = torch.zeros_like(tokens, dtype=torch.float)
+
+        prev_pos = 0
+        eos_reached = torch.tensor([False] * bsz, device="cuda")
+        input_text_mask = tokens != pad_id
+        if min_prompt_len == total_len:
+            logits = self.model.forward(tokens, prev_pos)
+            token_logprobs = -F.cross_entropy(
+                input=logits.transpose(1, 2),
+                target=tokens,
+                reduction="none",
+                ignore_index=pad_id,
+            )
+
+        stop_tokens = torch.tensor(list(self.tokenizer.stop_tokens))
+
+        for cur_pos in range(min_prompt_len, total_len):
+            logits = self.model.forward(tokens[:, prev_pos:cur_pos], prev_pos)
+            if temperature > 0:
+                probs = torch.softmax(logits[:, -1] / temperature, dim=-1)
+                next_token = sample_top_p(probs, top_p)
+            else:
+                next_token = torch.argmax(logits[:, -1], dim=-1)
+
+            next_token = next_token.reshape(-1)
+            # only replace token if prompt has already been generated
+            next_token = torch.where(
+                input_text_mask[:, cur_pos], tokens[:, cur_pos], next_token
+            )
+            tokens[:, cur_pos] = next_token
+            if logprobs:
+                token_logprobs[:, prev_pos + 1 : cur_pos + 1] = -F.cross_entropy(
+                    input=logits.transpose(1, 2),
+                    target=tokens[:, prev_pos + 1 : cur_pos + 1],
+                    reduction="none",
+                    ignore_index=pad_id,
+                )
+            eos_reached |= (~input_text_mask[:, cur_pos]) & (
+                torch.isin(next_token, stop_tokens)
+            )
+            prev_pos = cur_pos
+            if all(eos_reached):
+                break
+
+        if logprobs:
+            token_logprobs = token_logprobs.tolist()
+        out_tokens, out_logprobs = [], []
+        for i, toks in enumerate(tokens.tolist()):
+            # cut to max gen len
+            start = 0 if echo else len(prompt_tokens[i])
+            toks = toks[start : len(prompt_tokens[i]) + max_gen_len]
+            probs = None
+            if logprobs:
+                probs = token_logprobs[i][start : len(prompt_tokens[i]) + max_gen_len]
+            # cut to after eos tok if any
+            for stop_token in self.tokenizer.stop_tokens:
+                try:
+                    eos_idx = toks.index(stop_token)
+                    toks = toks[:eos_idx]
+                    probs = probs[:eos_idx] if logprobs else None
+                except ValueError:
+                    pass
+            out_tokens.append(toks)
+            out_logprobs.append(probs)
+        return (out_tokens, out_logprobs if logprobs else None)
 
     def configure_optimizers(self, device_type: str) -> torch.optim.Optimizer:
         # start with all of the candidate parameters
@@ -609,7 +781,9 @@ def download_llama3_weights(model_name: str) -> Path:
     from huggingface_hub import snapshot_download
 
     hf_model_id_map = {
-        "llama3-8B": "meta-llama/Meta-Llama-3-8B",
+        "llama-3.2-1B": "meta-llama/Llama-3.2-1B",
+        "llama-3.2-3B": "meta-llama/Llama-3.2-3B",
+        "llama-3.1-8B": "meta-llama/Llama-3.1-8B",
     }
 
     download_dir = snapshot_download(

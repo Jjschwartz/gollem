@@ -4,7 +4,7 @@ from gollem.models.config import ModelConfig
 
 
 model_registry = {
-    "llama3": ("llama3.config", "get_llama3_model_config"),
+    "llama-3": ("llama3.config", "get_llama3_model_config"),
     "gpt2": ("gpt2.config", "get_gpt2_model_config"),
 }
 

@@ -17,4 +17,5 @@ if [ "$size" == "8B" ]; then
 fi
 
 
+uv run huggingface-cli download meta-llama/Llama-3.2-1B --include "original/*" --local-dir checkpoints/llama-3.2-1B
 

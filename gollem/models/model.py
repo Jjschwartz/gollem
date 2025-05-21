@@ -30,7 +30,7 @@ class BaseLLM(nn.Module, Generic[ModelConfigT]):
         """
         raise NotImplementedError()
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def generate(
         self,
         tokens: torch.Tensor,
@@ -49,7 +49,7 @@ class BaseLLM(nn.Module, Generic[ModelConfigT]):
         for this.
         """
         for _ in range(max_new_tokens):
-            # if the sequence context is growing too long we must crop it at block_size
+            # if the sequence context is growing too long we must crop it
             ctx = (
                 tokens
                 if tokens.size(1) <= self.cfg.n_ctx

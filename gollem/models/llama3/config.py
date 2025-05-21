@@ -32,7 +32,7 @@ from gollem.utils import print0
 @dataclass
 class Llama3Config(ModelConfig):
     # Name of the model
-    model_name: str = field(default="llama3")
+    model_name: str = field(default="llama-3")
     # Context length
     # NOTE: Llama3 uses up to 128k context size
     # setting this to 1024 for now for early experiments
@@ -81,15 +81,16 @@ class Llama3Config(ModelConfig):
     from_pretrained: bool = field(default=False)
     # Maximum batch size for sampling
     max_sample_batch_size: int = field(default=1)
-    # whether to use KV caching for sampling or not
-    use_kv_caching: bool = field(default=False)
+    # whether to model is being used for inference or not (this will change whether
+    # things like kv-caching is used or not)
+    inference_mode: bool = field(default=False)
 
     def __post_init__(self):
         assert self.n_head % self.n_kv_head == 0
         assert self.d_model % self.n_head == 0
 
     def get_tokenizer(self) -> BaseTokenizer:
-        return get_tokenizer("llama3")
+        return get_tokenizer("llama-3")
 
     def get_model_and_optimizer(
         self, device: str | torch.device
@@ -287,10 +288,19 @@ class Llama3Config(ModelConfig):
         )
 
 
+def compute_intermediate_size(
+    d_model: int, ffn_dim_multiplier: float | None = None, multiple_of: int = 256
+):
+    d = int(2 * 4 * d_model / 3)
+    if ffn_dim_multiplier is not None:
+        d = int(ffn_dim_multiplier * d)
+    return multiple_of * ((d + multiple_of - 1) // multiple_of)
+
+
 # 33M params
 # 99% of params ar in the input and output embeddings
-LLAMA3_33M_CONFIG = Llama3Config(
-    model_name="llama3-33M",
+LLAMA_3_1_33M_CONFIG = Llama3Config(
+    model_name="llama-3.1-33M",
     n_layer=2,
     n_head=2,
     n_kv_head=2,
@@ -300,8 +310,8 @@ LLAMA3_33M_CONFIG = Llama3Config(
 )
 # 272M params
 # Similar to GPT-2 124M but with larger vocab size so more parameters in the embeddings
-LLAMA3_272M_CONFIG = Llama3Config(
-    model_name="llama3-272M",
+LLAMA_3_1_272M_CONFIG = Llama3Config(
+    model_name="llama-3.1-272M",
     n_layer=8,
     n_head=8,
     n_kv_head=8,
@@ -310,31 +320,28 @@ LLAMA3_272M_CONFIG = Llama3Config(
     learning_rate=6e-4,
 )
 # 1B params
-# Llama3 scaled down to 1B params (1.4B to be exact)
-LLAMA3_1B_CONFIG = Llama3Config(
-    model_name="llama3-1B",
+LLAMA_3_2_1B_CONFIG = Llama3Config(
+    model_name="llama-3.2-1B",
     n_layer=16,
-    n_head=16,
+    n_head=32,
     n_kv_head=8,
-    d_model=2048,  # d_head = 128
-    intermediate_size=7168,  # 3.5 * d_model
+    d_model=2048,  # d_head = 64
+    intermediate_size=8192,  # ffn_dim_multiplier=1.5, multiple_of=256
     learning_rate=3e-4,
 )
-# 2B params
-# Similar architecture to GPT-2 1.5B in terms of n_layers, n_heads, d_model
-# But with larger vocab size and using GQA
-LLAMA3_2B_CONFIG = Llama3Config(
-    model_name="llama3-2B",
-    n_layer=48,
+# 3B params
+LLAMA_3_2_3B_CONFIG = Llama3Config(
+    model_name="llama-3.2-3B",
+    n_layer=28,
     n_head=24,
     n_kv_head=8,
-    d_model=1536,  # n_head * 64
-    intermediate_size=6144,  # 4 * d_model to nearest multiple of 2048
+    d_model=3072,  # d_head = 128
+    intermediate_size=8192,  # ffn_dim_multiplier=1.0, multiple_of=256
     learning_rate=3e-4,
 )
 # 8B params
-LLAMA3_8B_CONFIG = Llama3Config(
-    model_name="llama3-8B",
+LLAMA_3_1_8B_CONFIG = Llama3Config(
+    model_name="llama-3.1-8B",
     n_layer=32,
     n_head=32,
     n_kv_head=8,
@@ -343,8 +350,8 @@ LLAMA3_8B_CONFIG = Llama3Config(
     learning_rate=3e-4,
 )
 # 70B params
-LLAMA3_70B_CONFIG = Llama3Config(
-    model_name="llama3-70B",
+LLAMA_3_1_70B_CONFIG = Llama3Config(
+    model_name="llama-3.1-70B",
     n_layer=80,
     n_head=64,
     n_kv_head=8,
@@ -354,8 +361,8 @@ LLAMA3_70B_CONFIG = Llama3Config(
 )
 
 # 405B params
-LLAMA3_405B_CONFIG = Llama3Config(
-    model_name="llama3-405B",
+LLAMA_3_1_405B_CONFIG = Llama3Config(
+    model_name="llama-3.1-405B",
     n_layer=126,
     n_head=128,
     n_kv_head=8,
@@ -367,13 +374,13 @@ LLAMA3_405B_CONFIG = Llama3Config(
 LLAMA3_CONFIGS = {
     cfg.model_name: cfg
     for cfg in [
-        LLAMA3_33M_CONFIG,
-        LLAMA3_272M_CONFIG,
-        LLAMA3_1B_CONFIG,
-        LLAMA3_2B_CONFIG,
-        LLAMA3_8B_CONFIG,
-        LLAMA3_70B_CONFIG,
-        LLAMA3_405B_CONFIG,
+        LLAMA_3_1_33M_CONFIG,
+        LLAMA_3_1_272M_CONFIG,
+        LLAMA_3_2_1B_CONFIG,
+        LLAMA_3_2_3B_CONFIG,
+        LLAMA_3_1_8B_CONFIG,
+        LLAMA_3_1_70B_CONFIG,
+        LLAMA_3_1_405B_CONFIG,
     ]
 }
 
