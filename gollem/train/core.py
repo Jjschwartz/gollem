@@ -39,6 +39,7 @@ def save_snapshot(
     train_loader: DataLoader,
     val_loader: DataLoader | None,
     step: int,
+    time_elapsed: float,
 ) -> None:
     snapshot_path = get_snapshot_path()
 
@@ -52,6 +53,7 @@ def save_snapshot(
         "train_loader": train_loader.state_dict(),
         "val_loader": val_loader.state_dict() if val_loader is not None else None,
         "step": step,
+        "time_elapsed": time_elapsed,
     }
     torch.save(data, snapshot_path)
 
@@ -71,6 +73,7 @@ def load_snapshot(
     DataLoader,
     DataLoader | None,
     int,
+    float,
 ]:
     data = torch.load(snapshot_path, weights_only=False)
     run_id = data["run_id"]
@@ -125,6 +128,7 @@ def load_snapshot(
         train_loader,
         val_loader,
         data["step"],
+        data["time_elapsed"],
     )
 
 
@@ -227,6 +231,7 @@ def run(
             train_loader,
             val_loader,
             snapshot_step,
+            time_elapsed,
         ) = load_snapshot(snapshot_path, device, ddp_world_size, ddp_rank)
         starting_step = snapshot_step + 1
         logger = RunLogger(
@@ -242,6 +247,7 @@ def run(
         run_id = uuid.uuid4().hex
         print0(f"Starting new run {run_id}")
         starting_step = 0
+        time_elapsed = 0.0
         logger = RunLogger(
             run_id=run_id,
             run_name=f"{model_config.model_name}_{dataset_config.name}",
@@ -306,10 +312,21 @@ def run(
         torch.cuda.reset_peak_memory_stats()
 
     # main training loop
-    logger.log(f"Starting training for {train_config.num_iterations} iterations")
+    training_start_time = time.monotonic() + time_elapsed
+    logger.log(
+        f"Starting training for {train_config.num_iterations} iterations at {starting_step=} with {time_elapsed=}"
+    )
     timings = []
-    for step in range(starting_step, train_config.num_iterations + 1):
-        final_step = step == train_config.num_iterations
+    step = starting_step
+    final_step = False
+    while step <= train_config.num_iterations and not final_step:
+        # check if we've hit the time limit or the number of iterations
+        # if we hit the time limit, we'll run the final step to do eval and sample
+        # but we won't do any more training
+        final_step = step == train_config.num_iterations or (
+            train_config.time_limit is not None
+            and time.monotonic() - training_start_time > train_config.time_limit
+        )
 
         # once in a while evaluate the validation dataset
         if (
@@ -332,8 +349,8 @@ def run(
             logger.log_metrics(
                 {"val_loss": val_loss, "val_time": (val_t1 - val_t0) * 1000}, step=step
             )
-        # once in a while perform m
-        # odel inference on the master process
+
+        # once in a while perform model inference on the master process
         if (
             train_config.sample_every > 0
             and (step % train_config.sample_every == 0 or final_step)
@@ -469,19 +486,22 @@ def run(
 
             if is_master_process:
                 save_snapshot(
-                    run_id,
-                    raw_model,
-                    optimizer,
-                    train_config,
-                    dataset_config,
-                    train_loader,
-                    val_loader,
-                    step,
+                    run_id=run_id,
+                    model=raw_model,
+                    optimizer=optimizer,
+                    train_config=train_config,
+                    dataset_config=dataset_config,
+                    train_loader=train_loader,
+                    val_loader=val_loader,
+                    step=step,
+                    time_elapsed=time.monotonic() - training_start_time,
                 )
                 snapshot_end_time = time.monotonic()
                 logger.log(
                     f"snapshot saved in {snapshot_end_time - snapshot_start_time} seconds"
                 )
+
+        step += 1
 
     # print the average of the last 20 timings, to get something smooth-ish
     timings = timings[-20:]
@@ -514,17 +534,18 @@ def run(
     if is_master_process and train_config.snapshot_every > 0:
         logger.log(f"saving final snapshot to {snapshot_path}")
         save_snapshot(
-            run_id,
-            raw_model,
-            optimizer,
-            train_config,
-            dataset_config,
-            train_loader,
-            val_loader,
-            train_config.num_iterations,
+            run_id=run_id,
+            model=raw_model,
+            optimizer=optimizer,
+            train_config=train_config,
+            dataset_config=dataset_config,
+            train_loader=train_loader,
+            val_loader=val_loader,
+            step=train_config.num_iterations,
+            time_elapsed=time.monotonic() - training_start_time,
         )
 
-    logger.log(f"Finished training {run_id}")
+    logger.log(f"Finished training {run_id} ")
 
     if not is_master_process:
         return {}

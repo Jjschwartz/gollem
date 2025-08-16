@@ -29,6 +29,8 @@ class TrainConfig:
     # How often to take a snapshot of the training state (0 = never).
     # Snapshotting is used for resuming training from a checkpoint.
     snapshot_every: int = 0
+    # Optional time limit for training run in seconds
+    time_limit: int | None = None
 
     # Device and memory management and optimization options
     # Device to use (autodetect by default, if empty or set to "auto").
