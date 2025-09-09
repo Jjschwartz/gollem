@@ -157,6 +157,7 @@ def main(n: int):
         device_ids=devices,
         output_device=devices[0],
     )
+    model.to(devices[0])
 
     print(model)
 
@@ -171,6 +172,9 @@ def main(n: int):
         loss = F.cross_entropy(logits.view(-1, logits.size(-1)), y, ignore_index=-1)
         loss.backward()
         optimizer.step()
+
+        print(logits)
+        print(loss)
 
         print(f"Step {step} | loss={loss.item():.4f}")
 
