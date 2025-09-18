@@ -5,45 +5,80 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-class MLP(nn.Module):
-    def __init__(self, d_model: int, d_mlp: int, devices: list[torch.device]) -> None:
+class Attention(nn.Module):
+    def __init__(
+        self, d_model: int, n_heads: int, d_head: int, device: torch.device
+    ) -> None:
         super().__init__()
         self.d_model = d_model
-        self.d_mlp = d_mlp
+        self.n_heads = n_heads
+        self.d_head = d_head
+        self.device = device
+
+        self.qkv_proj = nn.Linear(d_model, 3 * n_heads * d_head, device=device)
+        self.out_proj = nn.Linear(n_heads * d_head, d_model, device=device)
+        # ensure we are still initializing the weights correctly
+        # Linear layers are initialized to U(1/k, 1/k) where k is the input_dim
+        # which is the n_heads*d_head by default, so we we need to manually set this
+        # to use 1/d_model which is what is would be if we were on a single device
+        nn.init.normal_(self.out_proj.weight, mean=1 / d_model, std=1 / d_model)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        B, T, _ = x.size()
+
+        # Hack to make things work for single process, multi-gpu on cluster I have access too
+        x = x.to("cpu")
+        x = x.to(self.device, copy=True)
+
+        # B, T, (3 * n_heads * d_head)
+        qkv = self.qkv_proj(x)
+
+        # (B, T, n_heads * d_head)
+        q, k, v = qkv.split(self.n_heads * self.d_head, dim=2)
+
+        # (B, n_heads, T, d_head)
+        q = q.view(B, T, self.n_heads, self.d_head).transpose(1, 2)
+        k = k.view(B, T, self.n_heads, self.d_head).transpose(1, 2)
+        v = v.view(B, T, self.n_heads, self.d_head).transpose(1, 2)
+
+        # (B, n_heads, T, d_head)
+        z = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+        # (B, T, n_heads * d_head)
+        z = z.transpose(1, 2).contiguous().view(B, T, self.n_heads * self.d_head)
+        # (B, T, d_model)
+        out = self.out_proj(z)
+        return out
+
+
+class TPAttention(nn.Module):
+    def __init__(self, d_model: int, n_heads: int, devices: list[torch.device]) -> None:
+        super().__init__()
+        self.d_model = d_model
+        self.n_heads = n_heads
+        self.d_head = d_model // n_heads
         self.devices = devices
 
         n_devices = len(self.devices)
         assert n_devices >= 1
         # to keep things simple
-        assert self.d_mlp % n_devices == 0
-        assert self.d_model % n_devices == 0
+        assert self.n_heads % n_devices == 0
 
-        # block size is same for both w1 (columnwise) and w2 (rowwise)
-        # as we split on the d_mlp dimension for both
-        w_block_size = self.d_mlp // n_devices
+        self.n_heads_per_device = self.n_heads // n_devices
 
-        w1_blocks = []
-        w2_blocks = []
-        for d in self.devices:
-            w1 = nn.Linear(d_model, w_block_size, device=d)
-            w2 = nn.Linear(w_block_size, d_model, device=d)
-            w1_blocks.append(w1)
-            w2_blocks.append(w2)
-
-        self.w1_blocks = nn.ModuleList(w1_blocks)
-        self.w2_blocks = nn.ModuleList(w2_blocks)
-
-        self.gelu = nn.GELU()
+        self.attn_slices = nn.ModuleList(
+            [
+                Attention(d_model, self.n_heads_per_device, self.d_head, d)
+                for d in self.devices
+            ]
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         input_device = x.device
 
         final_h = torch.zeros_like(x, device=input_device)
-        for w1_block, w2_block, d in zip(self.w1_blocks, self.w2_blocks, self.devices):
+        for attn_slice, d in zip(self.attn_slices, self.devices):
             # broadcast input to device (scatter)
-            h = x.to(d, copy=True)
-            h = self.gelu(w1_block(h))
-            h = w2_block(h)
+            h = attn_slice(x)
             h = h.to(input_device)
             # accumulate (all-reduce sum)
             final_h = final_h + h
@@ -68,15 +103,15 @@ def main(n_steps: int, n_devices: int | None, debug: bool = False):
 
     batch_size = 8
     seq_len = 16
-    d_model = 8
-    d_mlp = 1 * d_model
+    d_model = 64
+    n_heads = 8
 
     torch.manual_seed(35)
 
     x = torch.randn((batch_size, seq_len, d_model), device=main_device)
     y = torch.randn((batch_size, seq_len, d_model), device=main_device)
 
-    model = MLP(d_model=d_model, d_mlp=d_mlp, devices=devices)
+    model = TPAttention(d_model=d_model, n_heads=n_heads, devices=devices)
     model(x)
     print(model)
 
